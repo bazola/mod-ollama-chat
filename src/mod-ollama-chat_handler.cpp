@@ -1167,6 +1167,23 @@ std::string GenerateBotGameStateSnapshot(Player* bot)
             default:                      statusText = "unknown"; break;
         }
 
+        // Local patch (roleplay words): at Strictness 2 the bot knows its errands as tasks it took on, not
+        // quest states, and tasks not yet taken or already rewarded are not on its mind.
+        if (SnapshotInWords())
+        {
+            char const* state = nullptr;
+            switch (qsd.Status)
+            {
+                case QUEST_STATUS_INCOMPLETE: state = "still under way"; break;
+                case QUEST_STATUS_COMPLETE:   state = "done, and you have yet to report back"; break;
+                case QUEST_STATUS_FAILED:     state = "failed"; break;
+                default:                      break;
+            }
+            if (state)
+                quests += "A task you took on, \"" + title + "\": " + state + "\n";
+            continue;
+        }
+
         quests += "Quest \"" + title + "\" is " + statusText + "\n";
     }
 

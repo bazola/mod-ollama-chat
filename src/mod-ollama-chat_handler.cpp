@@ -1584,7 +1584,20 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         {
             continue;
         }
-        
+
+        // Local patch (plan 21 P7): an order from the bot's master, on a chat where mod-playerbots
+        // hears orders (whisper, party, raid, guild), is not someone speaking to it.
+        if (g_SkipMasterCommands &&
+            (sourceLocal == SRC_WHISPER_LOCAL || sourceLocal == SRC_PARTY_LOCAL ||
+             sourceLocal == SRC_RAID_LOCAL || sourceLocal == SRC_GUILD_LOCAL) &&
+            OllamaIsCommandFromMaster(bot, player, trimmedMsg, sourceLocal == SRC_WHISPER_LOCAL))
+        {
+            if (g_DebugEnabled)
+                LOG_INFO("module.ollamachat", "[Ollama Chat] {} takes '{}' from {} as an order; no reply",
+                         bot->GetName(), trimmedMsg, player->GetName());
+            continue;
+        }
+
         // For channel messages, bots in eligibleBots have already passed STRICT channel checks
         // Only run additional eligibility checks for non-channel sources
         // EXCEPTION: If channel is nullptr but sourceLocal is a channel type (like GENERAL), 

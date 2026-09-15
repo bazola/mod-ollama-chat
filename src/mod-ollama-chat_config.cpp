@@ -209,6 +209,7 @@ bool        g_RegardEnable                  = false;
 uint32_t    g_RegardRefreshSeconds          = 60;
 uint32_t    g_RegardMaxPerPrompt            = 3;
 float       g_RegardMinStrength             = 10.0f;
+bool        g_SkipMasterCommands            = true;
 bool        g_RegardCompanyWords            = false;
 uint32_t    g_RegardCompanyChance           = 35;
 bool        g_ChronicleRumours              = false;
@@ -823,6 +824,8 @@ void LoadOllamaChatConfig()
     g_EventTypeAchievement        = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeAchievement", "");
     g_EventTypeUsedObject         = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeUsedObject", "");
 
+
+    g_SkipMasterCommands = sConfigMgr->GetOption<bool>("OllamaChat.SkipMasterCommands", true);
 
     // Load extra blacklist commands from config (comma-separated list)
     std::string extraBlacklist = sConfigMgr->GetOption<std::string>("OllamaChat.BlacklistCommands", "");

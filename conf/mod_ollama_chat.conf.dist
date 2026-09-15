@@ -226,6 +226,15 @@ OllamaChat.EnableWhisperReplies = 0
 #     Default:     2
 OllamaChat.MaxBotsToPick = 2
 
+# OllamaChat.SkipMasterCommands
+#     Description: Local patch (custom wow plan 21 P7). A bot does not answer in character when its
+#                  master gives it an order: a whisper, party, raid or guild message that mod-playerbots
+#                  runs as a command for that bot (its chat command names, "do <action>", "@filter ...").
+#                  Covers what BlacklistCommands can only guess at, such as the orders bot-control
+#                  addons send. Messages from anyone who is not the bot's master are untouched.
+#     Default:     1
+OllamaChat.SkipMasterCommands = 1
+
 # OllamaChat.BlacklistCommands
 #     Description: A comma-separated list of command prefixes that should be ignored by AI bots.
 #                  If a message starts with any of these prefixes, the bot will not respond.

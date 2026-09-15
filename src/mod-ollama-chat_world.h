@@ -50,6 +50,19 @@ inline bool OllamaIsRealPlayer(Player* player)
     return player && !OllamaIsBotPlayer(player);
 }
 
+// True when `speaker` is `bot`'s master and mod-playerbots will run `msg` as an
+// order to it (local patch, custom wow plan 21 P7).
+//
+// A bot-control addon such as CleanBot sends orders by the dozen ("co ?",
+// "maintenance", "s gray"). A bot answering one in character is answering
+// nothing, and BlacklistCommands can only guess at every addon's words.
+// `whisper` says the order came as a whisper, which mod-playerbots reads a
+// little differently ("queue" is not an order there).
+//
+// Mirrors PlayerbotAI::HandleCommand and ExternalEventHelper::ParseChatCommand;
+// keep it in step when mod-playerbots is rebased.
+bool OllamaIsCommandFromMaster(Player* bot, Player* speaker, std::string const& msg, bool whisper);
+
 // The continent a bot would actually name, for prompt use.
 //
 // Map::GetMapName() answers with the map's own name, and the Burning Crusade

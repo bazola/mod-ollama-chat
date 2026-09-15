@@ -33,6 +33,10 @@
 #include <thread>
 #include <vector>
 
+// Local patch (custom-wow): mod-ledger records channel replies, which bypass the
+// OnPlayerCanUseChat hooks. Weak so this links without it.
+void LedgerRecordBotChat(Player* bot, uint32 type, std::string const& msg, Channel* channel) __attribute__((weak));
+
 namespace
 {
     using Clock = std::chrono::steady_clock;
@@ -272,6 +276,8 @@ namespace
                     return false;
 
                 channel->Say(bot->GetGUID(), c.text, LANG_UNIVERSAL);
+                if (LedgerRecordBotChat)
+                    LedgerRecordBotChat(bot, CHAT_MSG_CHANNEL, c.text, channel);
                 outChannel = channel;
                 return true;
             }

@@ -2027,6 +2027,15 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
 
     std::string personality         = GetBotPersonality(bot);
     std::string personalityPrompt   = GetPersonalityPromptAddition(personality);
+    // Local patch (plan 15): someone is speaking to the bot, so use the full lore
+    // template (BIOX_<guid>: personality, whole backstory, whole motivation) when it has
+    // been projected. Chatter, events and emotes keep the short BIO_<guid> core.
+    if (personality.rfind("BIO_", 0) == 0)
+    {
+        auto full = g_PersonalityPrompts.find("BIOX_" + personality.substr(4));
+        if (full != g_PersonalityPrompts.end())
+            personalityPrompt = full->second;
+    }
     std::string botName             = bot->GetName();
     uint32_t botLevel               = bot->GetLevel();
     uint8_t botGenderByte           = bot->getGender();

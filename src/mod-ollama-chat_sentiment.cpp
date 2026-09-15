@@ -293,6 +293,7 @@ namespace
         float       score;          // -100 hatred .. 100 devotion
         std::string otherName;
         std::string description;    // one sentence in the bot's own words, may be empty
+        std::string aside;          // regard_aside (plans/18 P3): e.g. a sponsor's mind to bring them in, may be empty
     };
 
     // bot guid (counter) -> entries, strongest feeling first
@@ -309,11 +310,22 @@ namespace
         if (CharacterDatabase.Query("SELECT 1 FROM information_schema.tables "
                                     "WHERE table_schema = DATABASE() AND table_name = 'regard'"))
         {
-            QueryResult result = CharacterDatabase.Query(SafeFormat(
-                "SELECT r.bot_guid, r.other_guid, r.score, c.name, COALESCE(r.description, '') "
-                "FROM regard r JOIN characters c ON c.guid = r.other_guid "
-                "WHERE ABS(r.score) >= {} ORDER BY r.bot_guid, ABS(r.score) DESC",
-                g_RegardMinStrength));
+            // regard_aside (plans/18 P3) is kept by regard.py; a person with an aside is loaded however faint the
+            // feeling, so the clause is never dropped.
+            bool const asides = bool(CharacterDatabase.Query("SELECT 1 FROM information_schema.tables "
+                                                             "WHERE table_schema = DATABASE() AND table_name = 'regard_aside'"));
+            QueryResult result = asides
+                ? CharacterDatabase.Query(SafeFormat(
+                      "SELECT r.bot_guid, r.other_guid, r.score, c.name, COALESCE(r.description, ''), COALESCE(a.words, '') "
+                      "FROM regard r JOIN characters c ON c.guid = r.other_guid "
+                      "LEFT JOIN regard_aside a ON a.bot_guid = r.bot_guid AND a.other_guid = r.other_guid "
+                      "WHERE ABS(r.score) >= {} OR a.bot_guid IS NOT NULL ORDER BY r.bot_guid, ABS(r.score) DESC",
+                      g_RegardMinStrength))
+                : CharacterDatabase.Query(SafeFormat(
+                      "SELECT r.bot_guid, r.other_guid, r.score, c.name, COALESCE(r.description, ''), '' "
+                      "FROM regard r JOIN characters c ON c.guid = r.other_guid "
+                      "WHERE ABS(r.score) >= {} ORDER BY r.bot_guid, ABS(r.score) DESC",
+                      g_RegardMinStrength));
 
             if (result)
             {
@@ -321,7 +333,8 @@ namespace
                 {
                     Field* f = result->Fetch();
                     (*table)[f[0].Get<uint32_t>()].push_back({ f[1].Get<uint32_t>(), f[2].Get<float>(),
-                                                               f[3].Get<std::string>(), f[4].Get<std::string>() });
+                                                               f[3].Get<std::string>(), f[4].Get<std::string>(),
+                                                               f[5].Get<std::string>() });
                 } while (result->NextRow());
             }
         }
@@ -354,6 +367,8 @@ namespace
         std::string line = e.otherName + ": " + RegardWords(e.score) + ".";
         if (!e.description.empty())
             line += " " + e.description;
+        if (!e.aside.empty())
+            line += " " + e.aside;
         return line;
     }
 

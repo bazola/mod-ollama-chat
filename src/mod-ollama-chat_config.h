@@ -301,6 +301,10 @@ extern bool        g_RegardEnable;
 extern uint32_t    g_RegardRefreshSeconds;
 extern uint32_t    g_RegardMaxPerPrompt;
 extern float       g_RegardMinStrength;
+// Company words (plan 14 B3): a company's standing and who holds the bot's land, from guild_words /
+// land_words. Replies always carry them; ambient chatter only by chance, or when the topic is the guild.
+extern bool        g_RegardCompanyWords;
+extern uint32_t    g_RegardCompanyChance;
 extern uint32_t    g_RelationshipMaxLength;
 extern std::string g_RelationshipUpdatePrompt;
 extern std::string g_RelationshipPromptTemplate;

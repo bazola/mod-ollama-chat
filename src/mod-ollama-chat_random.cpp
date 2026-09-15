@@ -129,7 +129,7 @@ namespace
         return true;
     }
 
-    std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo)
+    std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo, bool guildTopic)
     {
         PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (!botAI || !botAI->GetChatHelper())
@@ -187,6 +187,7 @@ namespace
 
         prompt += Memory_BuildPromptSection(bot, nullptr);
         prompt += Regard_PromptSection(bot, nullptr);
+        prompt += Regard_CompanySection(bot, nullptr, guildTopic);
         prompt += Roleplay_BuildVoicePrompt(bot);
         prompt += Expression_BuildGesturePrompt();
 
@@ -373,7 +374,7 @@ void OllamaBotRandomChatter::HandleRandomChatter()
             continue;
         }
 
-        std::string prompt = BuildRandomChatterPrompt(bot, topic.text);
+        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic);
         if (prompt.empty())
         {
             reschedule();

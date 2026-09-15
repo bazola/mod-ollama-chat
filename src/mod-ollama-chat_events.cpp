@@ -308,12 +308,10 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
     AreaTableEntry const* area = ai->GetCurrentArea();
     AreaTableEntry const* zone = ai->GetCurrentZone();
 
+    Player* actor = actorName.empty() ? nullptr : ObjectAccessor::FindPlayerByName(actorName);
     std::string sentimentInfo;
-    if ((g_RegardEnable || g_EnableSentimentTracking) && !actorName.empty())
-    {
-        if (Player* actor = ObjectAccessor::FindPlayerByName(actorName))
-            sentimentInfo = g_RegardEnable ? Regard_WordsFor(bot, actor) : GetSentimentPromptAddition(bot, actor);
-    }
+    if ((g_RegardEnable || g_EnableSentimentTracking) && actor)
+        sentimentInfo = g_RegardEnable ? Regard_WordsFor(bot, actor) : GetSentimentPromptAddition(bot, actor);
 
     std::string prompt = SafeFormat(
         promptTemplate,
@@ -336,6 +334,7 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
 
     prompt += Memory_BuildPromptSection(bot, nullptr);
     prompt += Regard_PromptSection(bot, nullptr);
+    prompt += Regard_CompanySection(bot, actor, false);
     prompt += Roleplay_BuildVoicePrompt(bot);
     prompt += Expression_BuildGesturePrompt();
     return prompt;

@@ -94,4 +94,9 @@ std::string Regard_WordsFor(Player* bot, Player* other);
 // short prompt section. Empty when there are none.
 std::string Regard_PromptSection(Player* bot, Player* about);
 
+// Company words (plan 14 B3): what the bot knows of its company's seats, holdings and rivals, who holds
+// the land it stands in, and (when `other` belongs to another company) how the two companies stand.
+// `always` skips the OllamaChat.Regard.CompanyChance roll. Empty when disabled or nothing applies.
+std::string Regard_CompanySection(Player* bot, Player* other, bool always);
+
 #endif // MOD_OLLAMA_CHAT_SENTIMENT_H

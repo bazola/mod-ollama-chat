@@ -6,6 +6,7 @@
 #include "Log.h"
 #include "DatabaseEnv.h"
 #include "Player.h"
+#include "Random.h"
 #include "World.h"
 #include <fmt/core.h>
 #include <algorithm>
@@ -355,6 +356,71 @@ namespace
             line += " " + e.description;
         return line;
     }
+
+    // Company words (plan 14 B3). regard.py rewrites guild_words and land_words every cycle; they load
+    // on the same thread and timer as the regard table.
+    struct CompanyWords
+    {
+        std::unordered_map<uint32_t, std::string> guilds;   // guild id -> what members know of their company
+        std::unordered_map<uint32_t, std::string> lands;    // zone id -> who holds the land
+        std::unordered_map<uint32_t, std::string> names;    // guild id -> name
+        std::unordered_map<uint64_t, float>       stances;  // PairKey(guild, guild) -> -100 .. 100
+    };
+
+    std::shared_ptr<const CompanyWords> g_CompanyWords;   // guarded by g_RegardMutex
+
+    uint64_t PairKey(uint32_t a, uint32_t b)
+    {
+        return (uint64_t(std::min(a, b)) << 32) | std::max(a, b);
+    }
+
+    bool TableExists(char const* name)
+    {
+        return bool(CharacterDatabase.Query(SafeFormat(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '{}'", name)));
+    }
+
+    void LoadCompanyWords()
+    {
+        auto words = std::make_shared<CompanyWords>();
+
+        auto load = [](char const* table, char const* sql, auto&& add)
+        {
+            if (!TableExists(table))
+                return;
+            if (QueryResult result = CharacterDatabase.Query(sql))
+            {
+                do
+                {
+                    add(result->Fetch());
+                } while (result->NextRow());
+            }
+        };
+
+        load("guild_words", "SELECT guildid, words FROM guild_words",
+             [&](Field* f) { words->guilds[f[0].Get<uint32_t>()] = f[1].Get<std::string>(); });
+        load("land_words", "SELECT zone_id, words FROM land_words",
+             [&](Field* f) { words->lands[f[0].Get<uint32_t>()] = f[1].Get<std::string>(); });
+        load("guild", "SELECT guildid, name FROM guild",
+             [&](Field* f) { words->names[f[0].Get<uint32_t>()] = f[1].Get<std::string>(); });
+        load("guild_relation", "SELECT guild_a, guild_b, stance FROM guild_relation",
+             [&](Field* f) { words->stances[PairKey(f[0].Get<uint32_t>(), f[1].Get<uint32_t>())] = f[2].Get<float>(); });
+
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        g_CompanyWords = std::move(words);
+    }
+
+    // Keep in step with regard.py's stance_words() and COMPANY_TALK. Nothing for indifference.
+    char const* StanceTalk(float stance)
+    {
+        if (stance <= -60.0f) return "their company and yours are in a blood feud";
+        if (stance <= -30.0f) return "their company and yours are bitter rivals";
+        if (stance <= -10.0f) return "their company and yours are wary of each other";
+        if (stance < 10.0f)   return nullptr;
+        if (stance < 30.0f)   return "their company and yours are on good terms";
+        if (stance < 60.0f)   return "their company and yours are friends";
+        return "their company and yours are sworn allies";
+    }
 }
 
 void Regard_Tick(uint32 diff)
@@ -378,6 +444,8 @@ void Regard_Tick(uint32 diff)
     std::thread([]
     {
         LoadRegardTable();
+        if (g_RegardCompanyWords)
+            LoadCompanyWords();
         g_RegardLoading = false;
     }).detach();
 }
@@ -434,4 +502,49 @@ std::string Regard_PromptSection(Player* bot, Player* about)
         return "";
 
     return "\nPeople you feel strongly about (bring them up only if it fits):\n" + lines;
+}
+
+std::string Regard_CompanySection(Player* bot, Player* other, bool always)
+{
+    if (!g_RegardEnable || !g_RegardCompanyWords || !bot)
+        return "";
+
+    if (!always && urand(0, 99) >= g_RegardCompanyChance)
+        return "";
+
+    std::shared_ptr<const CompanyWords> words;
+    {
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        words = g_CompanyWords;
+    }
+    if (!words)
+        return "";
+
+    std::string text;
+    const uint32_t guildId = bot->GetGuildId();
+
+    if (guildId)
+    {
+        auto it = words->guilds.find(guildId);
+        if (it != words->guilds.end())
+            text += it->second + "\n";
+    }
+
+    auto land = words->lands.find(bot->GetZoneId());
+    if (land != words->lands.end())
+        text += land->second + "\n";
+
+    if (other && other != bot && guildId && other->GetGuildId() && other->GetGuildId() != guildId)
+    {
+        auto stance = words->stances.find(PairKey(guildId, other->GetGuildId()));
+        auto name = words->names.find(other->GetGuildId());
+        if (stance != words->stances.end() && name != words->names.end())
+            if (char const* talk = StanceTalk(stance->second))
+                text += other->GetName() + " is of " + name->second + ": " + talk + ".\n";
+    }
+
+    if (text.empty())
+        return "";
+
+    return "\nYour company and the lands around you (bring it up only if it fits):\n" + text;
 }

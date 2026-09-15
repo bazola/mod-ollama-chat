@@ -474,6 +474,39 @@ namespace
         std::lock_guard<std::mutex> lock(g_RegardMutex);
         g_Rumours = std::move(rumours);
     }
+
+    // Market talk (plan 17 E.4). market.py writes market_word from the auction houses: what is plentiful, scarce
+    // or selling in each city's market, in words. Team 2 rows are the neutral houses, heard by both teams.
+    std::shared_ptr<const RumourMap> g_MarketWords;   // RumourKey -> words, guarded by g_RegardMutex
+
+    void LoadMarketWords()
+    {
+        if (!TableExists("market_word"))
+            return;
+
+        auto market = std::make_shared<RumourMap>();
+        if (QueryResult result = CharacterDatabase.Query(
+                "SELECT zone_id, team, words FROM market_word WHERE expires_at > NOW() ORDER BY id DESC"))
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                const uint32_t zoneId = f[0].Get<uint32_t>();
+                const uint8_t team = f[1].Get<uint8_t>();
+                for (uint32_t t = 0; t < 2; ++t)
+                {
+                    if (team != t && team != 2)
+                        continue;
+                    auto& place = (*market)[RumourKey(zoneId, t)];
+                    if (place.size() < RUMOURS_PER_PLACE)
+                        place.push_back(f[2].Get<std::string>());
+                }
+            } while (result->NextRow());
+        }
+
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        g_MarketWords = std::move(market);
+    }
 }
 
 void Regard_Tick(uint32 diff)
@@ -501,6 +534,8 @@ void Regard_Tick(uint32 diff)
             LoadCompanyWords();
         if (g_ChronicleRumours)
             LoadRumours();
+        if (g_MarketTalk)
+            LoadMarketWords();
         g_RegardLoading = false;
     }).detach();
 }
@@ -626,4 +661,29 @@ std::string Chronicle_RumourSection(Player* bot, bool always)
 
     return "\nWord going around here (pass it on in your own words, only if it fits):\n"
         + it->second[urand(0, uint32(it->second.size() - 1))] + "\n";
+}
+
+std::string Market_Section(Player* bot, bool trade)
+{
+    if (!g_RegardEnable || !g_MarketTalk || !bot)
+        return "";
+
+    if (urand(0, 99) >= (trade ? g_MarketTradeChance : g_MarketChance))
+        return "";
+
+    std::shared_ptr<const RumourMap> market;
+    {
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        market = g_MarketWords;
+    }
+    if (!market)
+        return "";
+
+    auto it = market->find(RumourKey(bot->GetZoneId(), uint32_t(bot->GetTeamId())));
+    if (it == market->end() || it->second.empty())
+        return "";
+
+    return "\nTalk at the market here: " + it->second[urand(0, uint32(it->second.size() - 1))] + "\n"
+        "(Mention it naturally and in character, as something you saw or heard at the stalls; "
+        "never give prices, counts or other numbers.)\n";
 }

@@ -129,7 +129,7 @@ namespace
         return true;
     }
 
-    std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo, bool guildTopic)
+    std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo, bool guildTopic, bool trade)
     {
         PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (!botAI || !botAI->GetChatHelper())
@@ -194,6 +194,7 @@ namespace
         prompt += Regard_PromptSection(bot, nullptr);
         prompt += Regard_CompanySection(bot, nullptr, guildTopic);
         prompt += Chronicle_RumourSection(bot, variation.find("rumo") != std::string::npos);
+        prompt += Market_Section(bot, trade);
         prompt += Roleplay_BuildVoicePrompt(bot);
         prompt += Expression_BuildGesturePrompt();
 
@@ -380,7 +381,8 @@ void OllamaBotRandomChatter::HandleRandomChatter()
             continue;
         }
 
-        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic);
+        const bool trade = source == SRC_GENERAL_LOCAL && channelId == ChatChannelId::TRADE;
+        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic, trade);
         if (prompt.empty())
         {
             reschedule();

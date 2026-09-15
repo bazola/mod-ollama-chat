@@ -235,6 +235,19 @@ OllamaChat.MaxBotsToPick = 2
 #     Default:     1
 OllamaChat.SkipMasterCommands = 1
 
+# OllamaChat.Market.Talk
+# OllamaChat.Market.TradeChance
+# OllamaChat.Market.Chance
+#     Description: Local patch (custom wow plan 17 E.4). Bots in a city with an auction house talk about
+#                  its market, from market_word rows written by custom-wow services/economy/market.py
+#                  (words only, no prices). Loaded with the regard table, so OllamaChat.Regard.Enable must
+#                  be on. TradeChance is the chance a Trade-channel chatter line carries a market fact;
+#                  Chance is the chance for other chatter and replies while the bot stands in a market city.
+#     Default:     0, 60, 10
+OllamaChat.Market.Talk = 0
+OllamaChat.Market.TradeChance = 60
+OllamaChat.Market.Chance = 10
+
 # OllamaChat.BlacklistCommands
 #     Description: A comma-separated list of command prefixes that should be ignored by AI bots.
 #                  If a message starts with any of these prefixes, the bot will not respond.

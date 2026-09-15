@@ -104,4 +104,9 @@ std::string Regard_CompanySection(Player* bot, Player* other, bool always);
 // OllamaChat.Chronicle.RumourChance roll. Empty when disabled or nothing is going around.
 std::string Chronicle_RumourSection(Player* bot, bool always);
 
+// Market talk (plan 17 E.4): one thing people are saying about the market in the city the bot stands in, from
+// market_word (written by market.py, loaded on the regard thread). `trade` rolls OllamaChat.Market.TradeChance
+// (a Trade-channel line), otherwise OllamaChat.Market.Chance. Empty when disabled, outside a market, or no roll.
+std::string Market_Section(Player* bot, bool trade);
+
 #endif // MOD_OLLAMA_CHAT_SENTIMENT_H

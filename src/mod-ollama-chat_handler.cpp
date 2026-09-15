@@ -2169,6 +2169,7 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     prompt += Regard_PromptSection(bot, player);
     prompt += Regard_CompanySection(bot, player, true);
     prompt += Chronicle_RumourSection(bot, true);
+    prompt += Market_Section(bot, false);
 
     // Race and class as a voice rather than as a stat line.
     prompt += Roleplay_BuildVoicePrompt(bot);

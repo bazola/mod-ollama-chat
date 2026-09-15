@@ -308,6 +308,11 @@ extern uint32_t    g_RegardCompanyChance;
 // Rumours (plan 19): chronicler.py's chronicle_rumour in chatter and replies. Needs Regard.Enable (same loader).
 extern bool        g_ChronicleRumours;
 extern uint32_t    g_ChronicleRumourChance;
+// Market talk (plan 17 E.4): market.py's market_word in chatter and replies at the city markets. Needs
+// Regard.Enable (same loader). TradeChance is for Trade-channel chatter, Chance for everything else.
+extern bool        g_MarketTalk;
+extern uint32_t    g_MarketTradeChance;
+extern uint32_t    g_MarketChance;
 // Orders from a bot's master (plan 21 P7): no in-character reply to what mod-playerbots runs as a command.
 extern bool        g_SkipMasterCommands;
 extern uint32_t    g_RelationshipMaxLength;

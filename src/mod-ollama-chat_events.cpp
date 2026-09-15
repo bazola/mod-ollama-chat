@@ -118,7 +118,8 @@ namespace
         if (type == g_EventTypeCompletedQuest)
             return SafeFormat("{} finished the task '{}'", actor, detail);
         if (type == g_EventTypeLeveledUp)
-            return SafeFormat("{} grew stronger, now level {}", actor, detail);
+            return detail.empty() ? SafeFormat("{} grew stronger", actor)
+                                  : SafeFormat("{} grew stronger, now level {}", actor, detail);
         if (type == g_EventTypeAchievement)
             return SafeFormat("{} earned recognition for {}", actor, detail);
         if (type == g_EventTypeWonDuel)
@@ -482,7 +483,11 @@ void ChatOnLevelUp::OnPlayerLevelChanged(Player* player, uint8 /*oldLevel*/)
     if (!player)
         return;
 
-    const std::string level = std::to_string(player->GetLevel());
+    // Local patch (custom-wow): at hard roleplay the level is not something a
+    // person in the world could name, so the event carries no figure.
+    const std::string level = (g_RoleplayEnable && g_RoleplayStrictness >= 2)
+                                  ? std::string()
+                                  : std::to_string(player->GetLevel());
     eventChatter.DispatchGameEvent(player, g_EventTypeLeveledUp, level);
 
     if (player->GetGuild() && g_EnableGuildEventChatter && !g_GuildEventTypeLevelUp.empty())

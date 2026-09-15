@@ -703,6 +703,55 @@ std::string GetBotHistoryPrompt(uint64_t botGuid, uint64_t playerGuid, std::stri
     return result;
 }
 
+// Local patch (custom-wow): at roleplay Strictness 2 the snapshot describes
+// health, resources, distance and relative strength in words. Figures in the
+// prompt are the most quotable text there, and a person in the world could
+// not know them.
+static bool SnapshotInWords()
+{
+    return g_RoleplayEnable && g_RoleplayStrictness >= 2;
+}
+
+static std::string DescribeDistanceInWords(float yards)
+{
+    if (yards < 5.0f)   return "within arm's reach";
+    if (yards < 15.0f)  return "close by";
+    if (yards < 40.0f)  return "a short walk away";
+    if (yards < 100.0f) return "some way off";
+    return "far off";
+}
+
+static std::string DescribeStrengthInWords(Unit const* self, Unit const* other)
+{
+    const int delta = int(other->GetLevel()) - int(self->GetLevel());
+    if (delta >= 5)  return "far stronger than you";
+    if (delta >= 2)  return "stronger than you";
+    if (delta >= -1) return "about your match";
+    if (delta >= -5) return "weaker than you";
+    return "no real threat to you";
+}
+
+// Mana, energy and focus drain from full; rage and runic power build from none.
+static std::string DescribeResourceInWords(Player* bot, Powers power, char const* name)
+{
+    const uint32 max = bot->GetMaxPower(power);
+    if (max == 0)
+        return "";
+    const float pct = float(bot->GetPower(power)) / float(max);
+    const bool buildsUp = power == POWER_RAGE || power == POWER_RUNIC_POWER;
+    if (buildsUp)
+    {
+        if (pct <= 0.0f) return SafeFormat("no {} stirring", name);
+        if (pct < 0.4f)  return SafeFormat("your {} is building", name);
+        if (pct < 0.8f)  return SafeFormat("your {} runs hot", name);
+        return SafeFormat("your {} is at its peak", name);
+    }
+    if (pct >= 0.9f)  return SafeFormat("your {} is full", name);
+    if (pct >= 0.5f)  return SafeFormat("you have {} to spare", name);
+    if (pct >= 0.2f)  return SafeFormat("your {} is running low", name);
+    return SafeFormat("your {} is nearly spent", name);
+}
+
 // --- Helper: Spells ---
 std::string ChatHandler_GetBotSpellInfo(Player* bot)
 {
@@ -781,9 +830,12 @@ std::string ChatHandler_GetBotSpellInfo(Player* bot)
         const std::string& costText = std::get<2>(spellData);
 
         std::string line = spellName;
-        if (rank > 0)
-            line += " (Rank " + std::to_string(rank) + ")";
-        line += " - " + costText;
+        if (!SnapshotInWords())
+        {
+            if (rank > 0)
+                line += " (Rank " + std::to_string(rank) + ")";
+            line += " - " + costText;
+        }
 
         picked.push_back(std::move(line));
     }
@@ -815,6 +867,20 @@ std::vector<std::string> ChatHandler_GetGroupStatus(Player* bot)
         if (!member || !member->GetMap()) continue;
         if(bot == member) continue;
         float dist = bot->GetDistance(member);
+        std::string className = FormatPlayerClass(member->getClass());
+        std::string raceName = FormatPlayerRace(member->getRace());
+        if (SnapshotInWords())
+        {
+            std::string line = SafeFormat("{} ({} {}, {}, {})", member->GetName(), raceName, className,
+                                          Roleplay_DescribeHealth(member->GetHealth(), member->GetMaxHealth()),
+                                          DescribeDistanceInWords(dist));
+            if (Unit* attacker = member->GetVictim())
+                line += SafeFormat(" [fighting {}, who is {} and {}]", attacker->GetName(),
+                                   DescribeStrengthInWords(member, attacker),
+                                   Roleplay_DescribeHealth(attacker->GetHealth(), attacker->GetMaxHealth()));
+            info.push_back(std::move(line));
+            continue;
+        }
         std::string beingAttacked = "";
         if (Unit* attacker = member->GetVictim())
         {
@@ -822,8 +888,6 @@ std::vector<std::string> ChatHandler_GetGroupStatus(Player* bot)
                             ", Level: " + std::to_string(attacker->GetLevel()) + ", HP: " + std::to_string(attacker->GetHealth()) +
                             "/" + std::to_string(attacker->GetMaxHealth()) + ")]";
         }
-        std::string className = FormatPlayerClass(member->getClass());
-        std::string raceName = FormatPlayerRace(member->getRace());
         info.push_back(
             member->GetName() +
             " (Level: " + std::to_string(member->GetLevel()) +
@@ -859,6 +923,16 @@ std::vector<std::string> ChatHandler_GetVisiblePlayers(Player* bot, float radius
             continue;
 
         const float dist = bot->GetDistance(player);
+        if (SnapshotInWords())
+        {
+            scored.emplace_back(dist, SafeFormat(
+                "{} ({} {} of the {}, {}, {})",
+                player->GetName(),
+                FormatPlayerRace(player->getRace()), FormatPlayerClass(player->getClass()),
+                player->GetTeamId() == TEAM_ALLIANCE ? "Alliance" : "Horde",
+                DescribeStrengthInWords(bot, player), DescribeDistanceInWords(dist)));
+            continue;
+        }
         scored.emplace_back(dist, SafeFormat(
             "Player: {} (Level {}, {} {}, {}, {:.0f} yards)",
             player->GetName(), player->GetLevel(),
@@ -914,6 +988,16 @@ std::vector<std::string> ChatHandler_GetVisibleLocations(Player* bot, float radi
         else                          type = "NEUTRAL";
 
         const float dist = bot->GetDistance(c);
+        if (SnapshotInWords())
+        {
+            scored.emplace_back(dist, c->isDead()
+                ? SafeFormat("{}: {} ({})", type, c->GetName(), DescribeDistanceInWords(dist))
+                : SafeFormat("{}: {} ({}, {}, {})", type, c->GetName(),
+                             DescribeStrengthInWords(bot, c),
+                             Roleplay_DescribeHealth(c->GetHealth(), c->GetMaxHealth()),
+                             DescribeDistanceInWords(dist)));
+            continue;
+        }
         scored.emplace_back(dist, SafeFormat("{}: {} (Level {}, HP {}/{}, {:.0f} yards)",
                                              type, c->GetName(), c->GetLevel(),
                                              c->GetHealth(), c->GetMaxHealth(), dist));
@@ -975,6 +1059,23 @@ std::string ChatHandler_GetCombatSummary(Player* bot)
     auto classId = bot->getClass();
 
     auto printResource = [&](std::ostringstream& oss) {
+        if (SnapshotInWords())
+        {
+            std::string words;
+            switch (classId)
+            {
+                case CLASS_WARRIOR:      words = DescribeResourceInWords(bot, POWER_RAGE, "rage"); break;
+                case CLASS_ROGUE:        words = DescribeResourceInWords(bot, POWER_ENERGY, "energy"); break;
+                case CLASS_DEATH_KNIGHT: words = DescribeResourceInWords(bot, POWER_RUNIC_POWER, "runic power"); break;
+                case CLASS_HUNTER:       words = DescribeResourceInWords(bot, POWER_FOCUS, "focus"); break;
+                default:                 words = DescribeResourceInWords(bot, POWER_MANA, "mana"); break;
+            }
+            oss << "You are " << Roleplay_DescribeHealth(bot->GetHealth(), bot->GetMaxHealth());
+            if (!words.empty())
+                oss << "; " << words;
+            oss << ".";
+            return;
+        }
         switch (classId)
         {
             case CLASS_WARRIOR:

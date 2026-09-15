@@ -99,4 +99,9 @@ std::string Regard_PromptSection(Player* bot, Player* about);
 // `always` skips the OllamaChat.Regard.CompanyChance roll. Empty when disabled or nothing applies.
 std::string Regard_CompanySection(Player* bot, Player* other, bool always);
 
+// Rumours (plan 19): one thing the bot's faction is saying in the land it stands in, from chronicle_rumour
+// (written by chronicler.py, loaded on the regard thread). `always` skips the
+// OllamaChat.Chronicle.RumourChance roll. Empty when disabled or nothing is going around.
+std::string Chronicle_RumourSection(Player* bot, bool always);
+
 #endif // MOD_OLLAMA_CHAT_SENTIMENT_H

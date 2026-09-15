@@ -423,6 +423,44 @@ namespace
     }
 }
 
+// Rumours (plan 19). chronicler.py writes chronicle_rumour after every watch: what each faction's people are
+// saying in each land, plain where it happened and garbled further off. Loaded on the regard thread and timer.
+namespace
+{
+    constexpr std::size_t RUMOURS_PER_PLACE = 6;   // nearest news first, then the newest
+
+    uint64_t RumourKey(uint32_t zoneId, uint32_t team)
+    {
+        return (uint64_t(zoneId) << 8) | team;
+    }
+
+    using RumourMap = std::unordered_map<uint64_t, std::vector<std::string>>;   // RumourKey -> words
+
+    std::shared_ptr<const RumourMap> g_Rumours;   // guarded by g_RegardMutex
+
+    void LoadRumours()
+    {
+        if (!TableExists("chronicle_rumour"))
+            return;
+
+        auto rumours = std::make_shared<RumourMap>();
+        if (QueryResult result = CharacterDatabase.Query(
+                "SELECT zone_id, team, words FROM chronicle_rumour WHERE expires_at > NOW() ORDER BY distance, id DESC"))
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                auto& place = (*rumours)[RumourKey(f[0].Get<uint32_t>(), f[1].Get<uint8_t>())];
+                if (place.size() < RUMOURS_PER_PLACE)
+                    place.push_back(f[2].Get<std::string>());
+            } while (result->NextRow());
+        }
+
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        g_Rumours = std::move(rumours);
+    }
+}
+
 void Regard_Tick(uint32 diff)
 {
     static uint32 timer = 0;    // 0: load on the first tick after enabling
@@ -446,6 +484,8 @@ void Regard_Tick(uint32 diff)
         LoadRegardTable();
         if (g_RegardCompanyWords)
             LoadCompanyWords();
+        if (g_ChronicleRumours)
+            LoadRumours();
         g_RegardLoading = false;
     }).detach();
 }
@@ -547,4 +587,28 @@ std::string Regard_CompanySection(Player* bot, Player* other, bool always)
         return "";
 
     return "\nYour company and the lands around you (bring it up only if it fits):\n" + text;
+}
+
+std::string Chronicle_RumourSection(Player* bot, bool always)
+{
+    if (!g_RegardEnable || !g_ChronicleRumours || !bot)
+        return "";
+
+    if (!always && urand(0, 99) >= g_ChronicleRumourChance)
+        return "";
+
+    std::shared_ptr<const RumourMap> rumours;
+    {
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        rumours = g_Rumours;
+    }
+    if (!rumours)
+        return "";
+
+    auto it = rumours->find(RumourKey(bot->GetZoneId(), uint32_t(bot->GetTeamId())));
+    if (it == rumours->end() || it->second.empty())
+        return "";
+
+    return "\nWord going around here (pass it on in your own words, only if it fits):\n"
+        + it->second[urand(0, uint32(it->second.size() - 1))] + "\n";
 }

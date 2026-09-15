@@ -167,6 +167,8 @@ namespace
             Roleplay_UseRoleplayVariations() ? g_RoleplayQuestionVariations
                                              : g_RandomChatterQuestionVariations;
 
+        // Kept so a prompt asking for a rumour gets one when a rumour is going around (plan 19).
+        std::string variation;
         const bool haveStatements = !statements.empty();
         const bool haveQuestions  = !questions.empty();
 
@@ -174,20 +176,24 @@ namespace
         {
             const std::vector<std::string>& list =
                 (urand(0, 99) < g_RandomChatterQuestionChance) ? questions : statements;
-            prompt += " " + list[PickIndex(list.size())];
+            variation = list[PickIndex(list.size())];
         }
         else if (haveStatements)
         {
-            prompt += " " + statements[PickIndex(statements.size())];
+            variation = statements[PickIndex(statements.size())];
         }
         else if (haveQuestions)
         {
-            prompt += " " + questions[PickIndex(questions.size())];
+            variation = questions[PickIndex(questions.size())];
         }
+
+        if (!variation.empty())
+            prompt += " " + variation;
 
         prompt += Memory_BuildPromptSection(bot, nullptr);
         prompt += Regard_PromptSection(bot, nullptr);
         prompt += Regard_CompanySection(bot, nullptr, guildTopic);
+        prompt += Chronicle_RumourSection(bot, variation.find("rumo") != std::string::npos);
         prompt += Roleplay_BuildVoicePrompt(bot);
         prompt += Expression_BuildGesturePrompt();
 

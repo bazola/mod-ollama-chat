@@ -305,6 +305,9 @@ extern float       g_RegardMinStrength;
 // land_words. Replies always carry them; ambient chatter only by chance, or when the topic is the guild.
 extern bool        g_RegardCompanyWords;
 extern uint32_t    g_RegardCompanyChance;
+// Rumours (plan 19): chronicler.py's chronicle_rumour in chatter and replies. Needs Regard.Enable (same loader).
+extern bool        g_ChronicleRumours;
+extern uint32_t    g_ChronicleRumourChance;
 extern uint32_t    g_RelationshipMaxLength;
 extern std::string g_RelationshipUpdatePrompt;
 extern std::string g_RelationshipPromptTemplate;

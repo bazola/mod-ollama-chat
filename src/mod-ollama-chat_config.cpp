@@ -211,6 +211,8 @@ uint32_t    g_RegardMaxPerPrompt            = 3;
 float       g_RegardMinStrength             = 10.0f;
 bool        g_RegardCompanyWords            = false;
 uint32_t    g_RegardCompanyChance           = 35;
+bool        g_ChronicleRumours              = false;
+uint32_t    g_ChronicleRumourChance         = 25;
 uint32_t    g_RelationshipMaxLength         = 220;
 std::string g_RelationshipUpdatePrompt;
 std::string g_RelationshipPromptTemplate;
@@ -666,6 +668,8 @@ void LoadOllamaChatConfig()
     g_RegardMinStrength            = sConfigMgr->GetOption<float>("OllamaChat.Regard.MinStrength", 10.0f);
     g_RegardCompanyWords           = sConfigMgr->GetOption<bool>("OllamaChat.Regard.CompanyWords", false);
     g_RegardCompanyChance          = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.CompanyChance", 35));
+    g_ChronicleRumours             = sConfigMgr->GetOption<bool>("OllamaChat.Chronicle.Rumours", false);
+    g_ChronicleRumourChance        = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Chronicle.RumourChance", 25));
     g_RelationshipMaxLength        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MaxLength", 220);
 
     g_RelationshipUpdatePrompt     = sConfigMgr->GetOption<std::string>("OllamaChat.Relationship.UpdatePrompt", "");

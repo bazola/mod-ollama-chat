@@ -78,4 +78,20 @@ void SaveBotPlayerSentimentsToDB();
  */
 void InitializeSentimentTracking();
 
+// --------------------------------------------
+// Regard (local patch, plan 14)
+// --------------------------------------------
+
+// World tick: reloads the regard table on a background thread every
+// OllamaChat.Regard.RefreshSeconds. Cheap when disabled.
+void Regard_Tick(uint32 diff);
+
+// "How you feel about <the player>: you dislike and distrust them. <their own sentence>"
+// Empty when disabled or when the bot has no strong feeling about them.
+std::string Regard_WordsFor(Player* bot, Player* other);
+
+// The bot's strongest feelings about other people (excluding `about`), as a
+// short prompt section. Empty when there are none.
+std::string Regard_PromptSection(Player* bot, Player* about);
+
 #endif // MOD_OLLAMA_CHAT_SENTIMENT_H

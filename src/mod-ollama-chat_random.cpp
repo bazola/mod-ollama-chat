@@ -186,6 +186,7 @@ namespace
         }
 
         prompt += Memory_BuildPromptSection(bot, nullptr);
+        prompt += Regard_PromptSection(bot, nullptr);
         prompt += Roleplay_BuildVoicePrompt(bot);
         prompt += Expression_BuildGesturePrompt();
 
@@ -224,6 +225,9 @@ void OllamaBotRandomChatter::OnUpdate(uint32 diff)
     {
         maintenanceTimer -= diff;
     }
+
+    // Local patch (plan 14): reload the regard table that regard.py scores.
+    Regard_Tick(diff);
 
     if (g_ConversationHistorySaveInterval > 0)
     {

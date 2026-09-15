@@ -2056,7 +2056,8 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     float playerDistance            = player->IsInWorld() && bot->IsInWorld() ? player->GetDistance(bot) : -1.0f;
 
     std::string chatHistory         = GetBotHistoryPrompt(botGuid, playerGuid, playerMessage);
-    std::string sentimentInfo       = GetSentimentPromptAddition(bot, player);
+    // Local patch (plan 14): regard replaces the module's own sentiment score when enabled.
+    std::string sentimentInfo       = g_RegardEnable ? Regard_WordsFor(bot, player) : GetSentimentPromptAddition(bot, player);
 
     // Retrieve RAG information if enabled
     std::string ragInfo;
@@ -2126,6 +2127,7 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     // What this bot remembers, and how it feels about people. Bounded by
     // their own token budgets, so this cannot grow the prompt without limit.
     prompt += Memory_BuildPromptSection(bot, player);
+    prompt += Regard_PromptSection(bot, player);
 
     // Race and class as a voice rather than as a stat line.
     prompt += Roleplay_BuildVoicePrompt(bot);

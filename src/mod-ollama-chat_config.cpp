@@ -205,6 +205,10 @@ std::string g_MemoryPromptTemplate;
 bool        g_RelationshipEnable            = true;
 uint32_t    g_RelationshipMentionThreshold  = 8;
 uint32_t    g_RelationshipMaxPerPrompt      = 3;
+bool        g_RegardEnable                  = false;
+uint32_t    g_RegardRefreshSeconds          = 60;
+uint32_t    g_RegardMaxPerPrompt            = 3;
+float       g_RegardMinStrength             = 10.0f;
 uint32_t    g_RelationshipMaxLength         = 220;
 std::string g_RelationshipUpdatePrompt;
 std::string g_RelationshipPromptTemplate;
@@ -654,6 +658,10 @@ void LoadOllamaChatConfig()
     g_RelationshipEnable           = sConfigMgr->GetOption<bool>("OllamaChat.Relationship.Enable", true);
     g_RelationshipMentionThreshold = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MentionThreshold", 8);
     g_RelationshipMaxPerPrompt     = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MaxPerPrompt", 3);
+    g_RegardEnable                 = sConfigMgr->GetOption<bool>("OllamaChat.Regard.Enable", false);
+    g_RegardRefreshSeconds         = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.RefreshSeconds", 60);
+    g_RegardMaxPerPrompt           = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.MaxPerPrompt", 3);
+    g_RegardMinStrength            = sConfigMgr->GetOption<float>("OllamaChat.Regard.MinStrength", 10.0f);
     g_RelationshipMaxLength        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MaxLength", 220);
 
     g_RelationshipUpdatePrompt     = sConfigMgr->GetOption<std::string>("OllamaChat.Relationship.UpdatePrompt", "");

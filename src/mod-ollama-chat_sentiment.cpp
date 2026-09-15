@@ -6,9 +6,14 @@
 #include "Log.h"
 #include "DatabaseEnv.h"
 #include "Player.h"
+#include "World.h"
 #include <fmt/core.h>
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <mutex>
+#include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -269,4 +274,164 @@ void InitializeSentimentTracking()
     g_LastSentimentSaveTime = time(nullptr);
     
     LOG_INFO("module.ollamachat", "[Ollama Chat] Sentiment tracking system initialized");
+}
+
+// --------------------------------------------------------------------------
+// Regard (local patch, plan 14)
+// --------------------------------------------------------------------------
+// How a bot feels about each person it has dealt with, player or bot. Scored
+// outside the worldserver by /opt/wow/regard/regard.py into `regard`; this side
+// only reads. The table is loaded on a background thread and swapped in whole,
+// so building a prompt costs a mutex and a map lookup.
+
+namespace
+{
+    struct RegardEntry
+    {
+        uint32_t    otherGuid;
+        float       score;          // -100 hatred .. 100 devotion
+        std::string otherName;
+        std::string description;    // one sentence in the bot's own words, may be empty
+    };
+
+    // bot guid (counter) -> entries, strongest feeling first
+    using RegardTable = std::unordered_map<uint32_t, std::vector<RegardEntry>>;
+
+    std::mutex                          g_RegardMutex;
+    std::shared_ptr<const RegardTable>  g_RegardTable;
+    std::atomic<bool>                   g_RegardLoading{ false };
+
+    void LoadRegardTable()
+    {
+        auto table = std::make_shared<RegardTable>();
+
+        if (CharacterDatabase.Query("SELECT 1 FROM information_schema.tables "
+                                    "WHERE table_schema = DATABASE() AND table_name = 'regard'"))
+        {
+            QueryResult result = CharacterDatabase.Query(SafeFormat(
+                "SELECT r.bot_guid, r.other_guid, r.score, c.name, COALESCE(r.description, '') "
+                "FROM regard r JOIN characters c ON c.guid = r.other_guid "
+                "WHERE ABS(r.score) >= {} ORDER BY r.bot_guid, ABS(r.score) DESC",
+                g_RegardMinStrength));
+
+            if (result)
+            {
+                do
+                {
+                    Field* f = result->Fetch();
+                    (*table)[f[0].Get<uint32_t>()].push_back({ f[1].Get<uint32_t>(), f[2].Get<float>(),
+                                                               f[3].Get<std::string>(), f[4].Get<std::string>() });
+                } while (result->NextRow());
+            }
+        }
+
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        g_RegardTable = std::move(table);
+    }
+
+    std::shared_ptr<const RegardTable> RegardSnapshot()
+    {
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        return g_RegardTable;
+    }
+
+    // Words, never numbers: the standing rule is no figures in bot context.
+    // Keep in step with regard.py's words().
+    char const* RegardWords(float score)
+    {
+        if (score <= -60.0f) return "you despise them";
+        if (score <= -30.0f) return "you dislike and distrust them";
+        if (score <= -10.0f) return "you are wary of them";
+        if (score < 10.0f)   return "you feel little either way about them";
+        if (score < 30.0f)   return "you are on good terms with them";
+        if (score < 60.0f)   return "you like and trust them";
+        return "you would stand by them through anything";
+    }
+
+    std::string RegardLine(RegardEntry const& e)
+    {
+        std::string line = e.otherName + ": " + RegardWords(e.score) + ".";
+        if (!e.description.empty())
+            line += " " + e.description;
+        return line;
+    }
+}
+
+void Regard_Tick(uint32 diff)
+{
+    static uint32 timer = 0;    // 0: load on the first tick after enabling
+
+    if (!g_RegardEnable)
+        return;
+
+    if (timer > diff)
+    {
+        timer -= diff;
+        return;
+    }
+
+    timer = std::max<uint32>(10, g_RegardRefreshSeconds) * 1000;
+
+    if (World::IsStopped() || g_RegardLoading.exchange(true))
+        return;
+
+    std::thread([]
+    {
+        LoadRegardTable();
+        g_RegardLoading = false;
+    }).detach();
+}
+
+std::string Regard_WordsFor(Player* bot, Player* other)
+{
+    if (!g_RegardEnable || !bot || !other)
+        return "";
+
+    auto table = RegardSnapshot();
+    if (!table)
+        return "";
+
+    auto it = table->find(bot->GetGUID().GetCounter());
+    if (it == table->end())
+        return "";
+
+    const uint32_t otherGuid = other->GetGUID().GetCounter();
+    for (RegardEntry const& e : it->second)
+        if (e.otherGuid == otherGuid)
+            return "How you feel about " + RegardLine(e);
+
+    return "";
+}
+
+std::string Regard_PromptSection(Player* bot, Player* about)
+{
+    if (!g_RegardEnable || !bot || g_RegardMaxPerPrompt == 0)
+        return "";
+
+    auto table = RegardSnapshot();
+    if (!table)
+        return "";
+
+    auto it = table->find(bot->GetGUID().GetCounter());
+    if (it == table->end())
+        return "";
+
+    const uint32_t aboutGuid = about ? about->GetGUID().GetCounter() : 0;
+
+    std::string lines;
+    uint32_t taken = 0;
+    for (RegardEntry const& e : it->second)
+    {
+        if (e.otherGuid == aboutGuid)
+            continue;
+        if (taken >= g_RegardMaxPerPrompt)
+            break;
+        lines += " - " + RegardLine(e) + "\n";
+        ++taken;
+    }
+
+    if (lines.empty())
+        return "";
+
+    return "\nPeople you feel strongly about (bring them up only if it fits):\n" + lines;
 }

@@ -112,7 +112,8 @@ namespace
         if (type == g_EventTypeDefeatedPlayer)
             return SafeFormat("{} cut down {} in a fight", actor, detail);
         if (type == g_EventTypeDied)
-            return SafeFormat("{} was killed", actor);
+            return detail.empty() ? SafeFormat("{} was killed", actor)
+                                  : SafeFormat("{} was killed by {}", actor, detail);
         if (type == g_EventTypeGotItem)
             return SafeFormat("{} picked up {}", actor, detail);
         if (type == g_EventTypeCompletedQuest)
@@ -191,7 +192,8 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
         for (auto const& pair : ObjectAccessor::GetPlayers())
         {
             Player* player = pair.second;
-            if (!player || !player->IsInWorld() || player->GetGuildId() != guildId)
+            if (!player || !player->IsInWorld() || !player->IsAlive() ||
+                player->GetGuildId() != guildId)
                 continue;
 
             PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(player);
@@ -205,6 +207,13 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
         {
             Player* player = pair.GetSource();
             if (!player || !player->IsWithinDist(source, g_EventChatterRealPlayerDistance, false))
+                continue;
+
+            // A corpse is not a candidate. This also removes the dying bot's
+            // own comment on its death -- it is dead by the time OnUnitDeath
+            // runs -- which is the right voice to lose: the ones who should
+            // be talking are the ones still standing.
+            if (!player->IsAlive())
                 continue;
 
             PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(player);
@@ -401,12 +410,27 @@ void ChatOnLoot::OnPlayerStoreNewItem(Player* player, Item* item, uint32 /*count
 // --------------------------------------------------------------------------
 
 ChatOnDeath::ChatOnDeath()
-    : PlayerScript("ChatOnDeath", { PLAYERHOOK_ON_PLAYER_JUST_DIED }) { }
+    : UnitScript("ChatOnDeath", true, { UNITHOOK_ON_UNIT_DEATH }) { }
 
-void ChatOnDeath::OnPlayerJustDied(Player* player)
+void ChatOnDeath::OnUnitDeath(Unit* unit, Unit* killer)
 {
-    if (player)
-        eventChatter.DispatchGameEvent(player, g_EventTypeDied, "");
+    if (!unit || !unit->IsPlayer())
+        return;
+
+    Player* victim = unit->ToPlayer();
+    Player* killerPlayer = killer ? killer->GetCharmerOrOwnerPlayerOrPlayerItself() : nullptr;
+    if (killerPlayer == victim)
+        killerPlayer = nullptr;
+
+    // Who or what took them. Left empty for a fall, deep water or the cold:
+    // there is no name to give, and the memory line reads "was killed" as it
+    // always did. Anything else names the killer, so a witness can say what it
+    // actually saw instead of "someone died".
+    std::string detail;
+    if (killer && killer != victim)
+        detail = killerPlayer ? killerPlayer->GetName() : killer->GetName();
+
+    eventChatter.DispatchGameEvent(victim, g_EventTypeDied, detail);
 }
 
 // --------------------------------------------------------------------------

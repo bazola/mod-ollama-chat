@@ -299,7 +299,10 @@ void OllamaBotRandomChatter::HandleRandomChatter()
     for (auto const& itr : allPlayers)
     {
         Player* bot = itr.second;
-        if (!bot || !bot->IsInWorld() || bot->IsBeingTeleported())
+        // Skip the dead early: Deliver() would drop the line anyway, and
+        // ambient chatter is the one path that would otherwise pay for an
+        // inference on behalf of a corpse.
+        if (!bot || !bot->IsInWorld() || bot->IsBeingTeleported() || !bot->IsAlive())
             continue;
 
         PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);

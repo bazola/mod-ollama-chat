@@ -45,11 +45,16 @@ public:
     void OnPlayerStoreNewItem(Player* player, Item* item, uint32 count) override;
 };
 
-class ChatOnDeath : public PlayerScript
+// Death used to hang off OnPlayerJustDied, which carries no killer -- so the
+// only thing a bot could be told was that someone "died", with no idea what
+// took them. OnUnitDeath hands over victim and killer together (it is the same
+// hook mod-ledger writes its death row from), so the line can name the foe
+// without stashing state between two hooks that fire a tick apart.
+class ChatOnDeath : public UnitScript
 {
 public:
     ChatOnDeath();
-    void OnPlayerJustDied(Player* player) override;
+    void OnUnitDeath(Unit* unit, Unit* killer) override;
 };
 
 class ChatOnQuest : public PlayerScript

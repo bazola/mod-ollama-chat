@@ -336,6 +336,15 @@ namespace
         if (!bot || !bot->IsInWorld())
             return;
 
+        // The dead do not speak. This is the last mile -- every send in the
+        // module goes through RouteMessage below -- so the check belongs here
+        // even though it throws away work already paid for: a bot can die
+        // while its line is in flight, which is exactly when a line about
+        // dying was most likely generated. The witnesses who watched it fall
+        // are alive, and they are the right voice for that anyway.
+        if (!bot->IsAlive())
+            return;
+
         PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (!botAI)
             return;

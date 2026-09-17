@@ -618,6 +618,43 @@ OllamaChat.Addressee.Enable = 0
 #   Default:     2
 OllamaChat.Addressee.MinCandidates = 2
 
+# OllamaChat.Initiate.Enable
+#   Description: Let a bot START something (plan 25 item 40). Ambient chatter
+#                already picks topics ABOUT nearby people -- it resolved a live
+#                player to write the line and then threw the pointer away. This
+#                keeps it, so the line can be aimed AT them instead of at the
+#                room.
+#
+#                No new reply machinery is needed: a bot's spoken line re-enters
+#                the same ProcessChat that a player's does, so naming someone
+#                short-circuits the candidate scan and counts as direct address
+#                -- the named bot answers, and skips the pacing cooldowns.
+#
+#                Only fires for a target in earshot (SayDistance) who is alive
+#                and in world; a group member may be a continent away, and a
+#                line addressed to someone who cannot hear it is a line nobody
+#                answers.
+#   Default:     0 (off -- it changes who starts conversations, the largest
+#                change in how an evening feels of anything here)
+OllamaChat.Initiate.Enable = 0
+
+# OllamaChat.Initiate.Chance
+#   Description: Percent of eligible ambient lines that are turned toward the
+#                person they are about. The rest are still said to the room.
+#                Keep it well below 100: if every remark about someone were
+#                addressed to them, the world would read as relentless.
+#   Default:     25
+OllamaChat.Initiate.Chance = 25
+
+# OllamaChat.Initiate.Directive
+#   Description: Appended to the prompt LAST, after the length register and the
+#                voice and gesture sections, which would otherwise dilute it.
+#                Placeholder: {target_name}. It must make the model say the name
+#                aloud -- the name is the whole mechanism, since that is what
+#                triggers the reply.
+#   Default:     the wording compiled in, which an absent or empty key restores.
+OllamaChat.Initiate.Directive = " Speak to {target_name} directly, by name, as though opening a conversation with them rather than remarking to the room."
+
 # OllamaChat.Addressee.PromptTemplate
 #   Description: The question put to the cheap lane. Placeholders: {speaker_name}
 #                {message} {candidates} ({max_names} is also available, though the

@@ -44,6 +44,17 @@ struct TopicPick
     std::string   key;          // provider id, for recency suppression
     std::string   text;         // the formatted prompt fragment
     bool          isGuildTopic = false;
+
+    // Who this topic is ABOUT, when it is about a person at all. The People
+    // gatherers already resolve a live Player to build their text and then
+    // threw the pointer away; carrying the guid and name lets an ambient line
+    // be aimed at them instead of at the room. 0 means "about no one".
+    //
+    // Naming them in the line is what makes it work: a named bot short-circuits
+    // the candidate scan and counts as direct address, so it answers, and
+    // promptly.
+    uint64_t    targetGuid = 0;
+    std::string targetName;
 };
 
 // Choose a topic for this bot right now. World thread only -- reads live state.

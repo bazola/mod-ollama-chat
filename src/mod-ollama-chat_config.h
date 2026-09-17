@@ -272,6 +272,15 @@ extern std::vector<std::string> g_EventRegisters;
 extern bool        g_AddresseeEnable;
 extern uint32_t    g_AddresseeMinCandidates;
 extern std::string g_AddresseePromptTemplate;
+
+// Bots starting something (plan 25 item 40). An ambient line about a person can
+// be aimed AT that person instead of at the room: naming them short-circuits the
+// candidate scan and counts as direct address, so they answer, and promptly.
+// Off by default -- it changes who starts conversations, which is the largest
+// change in how an evening feels of anything here.
+extern bool        g_InitiateEnable;
+extern uint32_t    g_InitiateChance;
+extern std::string g_InitiateDirective;
 extern std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------

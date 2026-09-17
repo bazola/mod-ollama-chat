@@ -67,6 +67,12 @@ namespace
         std::string   key;
         std::string   text;
         bool          isGuildTopic = false;
+
+        // Set only by gatherers that are already holding a live Player. These
+        // have default initialisers so the existing aggregate init in Add()
+        // keeps compiling untouched.
+        uint64_t    targetGuid = 0;
+        std::string targetName;
     };
 
     struct WitnessedEvent
@@ -103,12 +109,16 @@ namespace
         return list[PickIndex(list.size())];
     }
 
+    // targetGuid/targetName are optional and default to "about no one", so all
+    // twenty-odd existing call sites are unchanged.
     void Add(std::vector<Candidate>& out, TopicCategory cat, const char* key,
-             const std::vector<std::string>& templates, std::string formatted)
+             const std::vector<std::string>& templates, std::string formatted,
+             uint64_t targetGuid = 0, std::string targetName = {})
     {
         if (templates.empty() || formatted.empty() || formatted == "[Format Error]")
             return;
-        out.push_back({ cat, key, std::move(formatted), false });
+        out.push_back({ cat, key, std::move(formatted), false,
+                        targetGuid, std::move(targetName) });
     }
 
     std::string DescribePlayerState(Player* p)
@@ -195,7 +205,8 @@ namespace
                            fmt::arg("player_level", subject->GetLevel()),
                            fmt::arg("player_state", DescribePlayerState(subject)),
                            fmt::arg("level_gap",
-                                    int32(subject->GetLevel()) - int32(bot->GetLevel()))));
+                                    int32(subject->GetLevel()) - int32(bot->GetLevel()))),
+                subject->GetGUID().GetRawValue(), subject->GetName());
         }
 
         // Group members by name and what they are doing.
@@ -217,7 +228,8 @@ namespace
                                fmt::arg("member_name", m->GetName()),
                                fmt::arg("member_class", ClassName(m)),
                                fmt::arg("member_state", DescribePlayerState(m)),
-                               fmt::arg("member_level", m->GetLevel())));
+                               fmt::arg("member_level", m->GetLevel())),
+                    m->GetGUID().GetRawValue(), m->GetName());
             }
 
             // Somebody in the group needs something.
@@ -749,6 +761,8 @@ TopicPick Topics_Pick(Player* bot, const OllamaWorldSnapshot& world)
         pick.key          = chosen->key;
         pick.text         = chosen->text;
         pick.isGuildTopic = chosen->isGuildTopic;
+        pick.targetGuid   = chosen->targetGuid;
+        pick.targetName   = chosen->targetName;
         return pick;
     }
 

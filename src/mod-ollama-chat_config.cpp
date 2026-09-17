@@ -180,6 +180,9 @@ std::vector<std::string> g_EventRegisters;
 bool        g_AddresseeEnable         = false;
 uint32_t    g_AddresseeMinCandidates  = 2;
 std::string g_AddresseePromptTemplate;
+bool        g_InitiateEnable          = false;
+uint32_t    g_InitiateChance          = 25;
+std::string g_InitiateDirective;
 std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------
@@ -1049,6 +1052,18 @@ void LoadOllamaChatConfig()
         "unless the words name one of them, or plainly answer something only one "
         "of them could have said - then answer {{\"to\":[\"name\"]}} with that one "
         "name. Reply with JSON and nothing else.");
+
+    // Bots starting something. When an ambient topic is about a specific person
+    // who is close enough to hear, this turns the line toward them instead of
+    // at the room. The directive is appended after the length register, so it
+    // is the last thing the model reads -- and it must make the model SAY the
+    // name, because the name is what triggers the reply.
+    g_InitiateEnable    = sConfigMgr->GetOption<bool>("OllamaChat.Initiate.Enable", false);
+    g_InitiateChance    = sConfigMgr->GetOption<uint32_t>("OllamaChat.Initiate.Chance", 25);
+    g_InitiateDirective = sConfigMgr->GetOption<std::string>(
+        "OllamaChat.Initiate.Directive",
+        " Speak to {target_name} directly, by name, as though opening a conversation "
+        "with them rather than remarking to the room.");
 
     // --- Roleplay-mode variation lists -----------------------------------
     // These replace the shipped out-of-character lists at strictness 2. The

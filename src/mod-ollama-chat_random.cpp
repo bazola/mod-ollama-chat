@@ -131,7 +131,7 @@ namespace
     }
 
     std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo, bool guildTopic, bool trade,
-                                         uint32_t& outMaxWords)
+                                         uint32_t& outMaxWords, const std::string& targetName = {})
     {
         PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (!botAI || !botAI->GetChatHelper())
@@ -201,6 +201,13 @@ namespace
         prompt += Market_Section(bot, trade);
         prompt += Roleplay_BuildVoicePrompt(bot);
         prompt += Expression_BuildGesturePrompt();
+
+        // Aimed at someone, not at the room. Appended dead last -- after the
+        // voice and gesture sections, which would otherwise dilute it -- because
+        // the model has to actually SAY the name: the name is what makes the
+        // named bot short-circuit the candidate scan and answer.
+        if (!targetName.empty() && !g_InitiateDirective.empty())
+            prompt += SafeFormat(g_InitiateDirective, fmt::arg("target_name", targetName));
 
         return prompt;
     }
@@ -389,8 +396,28 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         }
 
         const bool trade = source == SRC_GENERAL_LOCAL && channelId == ChatChannelId::TRADE;
+        // Turn this line toward the person it is about, sometimes. Only when the
+        // topic named a live person, only on a roll, and only for a target the
+        // bot can actually be heard by -- a group member may be a continent
+        // away, and a line addressed to someone out of earshot is a line nobody
+        // answers. Speaking to the room stays the default.
+        uint64_t    initiateGuid = 0;
+        std::string initiateName;
+        if (g_InitiateEnable && topic.targetGuid != 0 && !topic.targetName.empty() &&
+            urand(0, 99) < g_InitiateChance && source != SRC_WHISPER_LOCAL)
+        {
+            Player* target = ObjectAccessor::FindConnectedPlayer(ObjectGuid(topic.targetGuid));
+            if (target && target->IsInWorld() && target->IsAlive() &&
+                bot->IsWithinDistInMap(target, g_SayDistance))
+            {
+                initiateGuid = topic.targetGuid;
+                initiateName = topic.targetName;
+            }
+        }
+
         uint32_t maxWords = 0;
-        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic, trade, maxWords);
+        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic, trade, maxWords,
+                                                      initiateName);
         if (prompt.empty())
         {
             reschedule();
@@ -399,7 +426,7 @@ void OllamaBotRandomChatter::HandleRandomChatter()
 
         OllamaChatRequest request;
         request.botGuid     = rawGuid;
-        request.targetGuid  = 0;
+        request.targetGuid  = initiateGuid;   // 0 = said to the room, as before
         request.source      = source;
         request.channelName = channelName;
         request.channelId   = channelId;

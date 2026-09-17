@@ -249,6 +249,9 @@ extern bool        g_RoleplayBlockMetaTerms;
 extern std::string g_RoleplayMetaTermList;
 extern bool        g_RoleplayCrossFactionGibberish;
 extern std::vector<std::string> g_RoleplayPromptVariations;
+// One is drawn per reply and appended last, so a bot answering a player can be curt or
+// expansive as the moment asks. Without it every reply came out at one fixed length.
+extern std::vector<std::string> g_ReplyRegisters;
 extern std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------

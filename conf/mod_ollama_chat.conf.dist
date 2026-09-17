@@ -542,6 +542,18 @@ OllamaChat.ChatPromptTemplate = "You're a WoW player familiar with 3.3.5 version
 #   Placeholders (named): {bot_race} {bot_gender} {bot_role} {bot_faction} {bot_guild} {bot_group_status} {bot_gold} {player_race} {player_gender} {player_role} {player_faction} {player_guild} {player_group_status} {player_gold} {player_distance} {bot_area} {bot_zone} {bot_map}
 OllamaChat.ChatExtraInfoTemplate = "Your Info: {bot_race} {bot_gender}, Spec: {bot_role}, Faction: {bot_faction}, Guild: {bot_guild}, Group: {bot_group_status}, Gold: {bot_gold}. Player Info: {player_race} {player_gender}, Spec: {player_role}, Faction: {player_faction}, Guild: {player_guild}, Group: {player_group_status}, Gold: {player_gold}, Distance: {player_distance} yards. Location: {bot_area}, Zone: {bot_zone}, Map: {bot_map}. Only respond to the new message. No commentary, no meta-talk, no prefix—just the reply."
 
+# OllamaChat.ReplyRegisters
+#   Description: A pipe-separated (|) list of length instructions. One is drawn at random per
+#                reply and appended to the prompt last, so a bot answering a player can be curt
+#                or expansive as the moment asks, instead of every reply arriving at one fixed
+#                length. Weight the list by repeating an entry: short answers should stay the
+#                norm, which is why the default below repeats the two shortest.
+#   Note: ChatPromptTemplate must not also fix a length, or the two instructions fight and the
+#         template wins. Leave the template's length open ("at the length asked for at the end").
+#   Default: the eleven entries below, which are also compiled in as the fallback when this key
+#            is absent or empty, so removing it changes nothing.
+OllamaChat.ReplyRegisters = Answer in a few words.|Answer in a few words.|Answer in a few words.|Answer in under twenty-five words.|Answer in under twenty-five words.|Answer in under twenty-five words.|Answer in up to forty-five words if what they said deserves it.|Answer in up to forty-five words if what they said deserves it.|If they asked how something in this world works, explain it properly, up to seventy words; otherwise keep it short.|If what they said touches on what people owe one another, say what you believe and why, up to seventy words; otherwise keep it short.|Answer at length, up to ninety words: say what you actually think, and why.
+
 # --------------------------------------------
 # ENVIRONMENTAL/CONTEXTUAL TEMPLATES
 # --------------------------------------------

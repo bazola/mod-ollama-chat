@@ -2178,6 +2178,13 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     // the line is spoken, so it never reaches chat as text.
     prompt += Expression_BuildGesturePrompt();
 
+    // How long this answer may run, drawn per utterance and appended last so it is the final
+    // instruction the model reads. The template no longer fixes one length: every reply used to
+    // come out in the same clipped register, whatever was asked. Ambient chatter gets the same
+    // treatment through its variation list; this is the reply path's equivalent.
+    if (!g_ReplyRegisters.empty())
+        prompt += " " + g_ReplyRegisters[urand(0, static_cast<uint32_t>(g_ReplyRegisters.size() - 1))];
+
     // Debug logging for full prompt including RAG information
     if (g_DebugEnabled && g_DebugShowFullPrompt) {
         LOG_INFO("module.ollamachat", "[Ollama Chat] Full prompt sent to bot {} for player {}: {}", botName, playerName, prompt);

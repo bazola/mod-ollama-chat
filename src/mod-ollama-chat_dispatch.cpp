@@ -44,7 +44,7 @@ namespace
 {
     using Clock = std::chrono::steady_clock;
 
-    enum class TaskType : uint8_t { ChatReply, Sentiment, Condense, Relationship, Classify };
+    enum class TaskType : uint8_t { ChatReply, Sentiment, Condense, Relationship, Classify, HeldTongue };
 
     struct Task
     {
@@ -66,6 +66,9 @@ namespace
         // Addressee-pass payload: everything needed to submit the real replies
         // once the answer comes back, since ProcessChat's locals are gone by then.
         OllamaAddresseeRequest addressee;
+
+        // Held-tongue payload: who stayed quiet, and what they stayed quiet about.
+        OllamaHeldTongueRequest heldTongue;
     };
 
     struct Completion
@@ -80,6 +83,11 @@ namespace
         // the resolver instead of to Deliver -- nothing here is ever said.
         bool                   isClassify = false;
         OllamaAddresseeRequest addressee;
+
+        // Nor is a held tongue. It comes back the same way, for the same
+        // reason: the emote and the memory write are both world-thread work.
+        bool                    isHeldTongue = false;
+        OllamaHeldTongueRequest heldTongue;
     };
 
     // --- shared state -----------------------------------------------------
@@ -203,6 +211,28 @@ namespace
         g_done.push_back(std::move(completion));
     }
 
+    // A held tongue, worker half. Asks the cheap lane what a passed-over bot
+    // kept to itself and how much it mattered, in one answer. Nothing here is
+    // spoken, so there is no cleanup, no filter and no typing delay.
+    void RunHeldTongueTask(const Task& task)
+    {
+        OllamaApiResult api = QueryOllama(task.request.prompt, OllamaRequestKind::Classify);
+
+        Completion completion;
+        completion.request      = task.request;
+        completion.isHeldTongue = true;
+        completion.heldTongue   = task.heldTongue;
+        completion.deliverAt    = Clock::now();
+
+        if (api.ok)
+            completion.text = std::move(api.text);
+        else
+            RecordError(api.error);   // no thought, no emote; the bot stays quiet
+
+        std::lock_guard<std::mutex> lock(g_doneMutex);
+        g_done.push_back(std::move(completion));
+    }
+
     void RunSentimentTask(const Task& task)
     {
         // Sentiment touches only mutex-guarded in-memory state and async DB
@@ -247,6 +277,9 @@ namespace
                         break;
                     case TaskType::Classify:
                         RunClassifyTask(task);
+                        break;
+                    case TaskType::HeldTongue:
+                        RunHeldTongueTask(task);
                         break;
                     default:
                         RunChatTask(task);
@@ -377,6 +410,80 @@ namespace
         }
     }
 
+    // A held tongue, world-thread half. Reads {"thought": "...", "weight": N}
+    // and does two things with it: the bot remembers the thought, and if it
+    // weighed heavily enough, the room sees that something was withheld.
+    //
+    // The thought itself is never displayed -- only the fact of it -- so the
+    // text never has to be safe to show.
+    void ResolveHeldTongue(const Completion& c)
+    {
+        const OllamaHeldTongueRequest& h = c.heldTongue;
+
+        if (c.text.empty())
+            return;                 // lane down: no thought, no emote
+
+        std::string thought;
+        uint32_t    weight = 0;
+
+        const size_t open  = c.text.find('{');
+        const size_t close = c.text.rfind('}');
+        if (open == std::string::npos || close == std::string::npos || close <= open)
+            return;
+
+        try
+        {
+            const nlohmann::json j = nlohmann::json::parse(c.text.substr(open, close - open + 1));
+
+            const auto t = j.find("thought");
+            if (t != j.end() && t->is_string())
+                thought = t->get<std::string>();
+
+            const auto w = j.find("weight");
+            if (w != j.end() && w->is_number())
+            {
+                // Plain comparison rather than std::max: <algorithm> is not
+                // included here, and a model that answers -1 or 99 should be
+                // clamped rather than trusted.
+                const double raw = w->get<double>();
+                weight = raw <= 0.0 ? 0u
+                       : (raw >= 10.0 ? 10u : static_cast<uint32_t>(raw));
+            }
+        }
+        catch (const std::exception&)
+        {
+            return;                 // unparseable: as if it never happened
+        }
+
+        if (thought.empty())
+            return;
+
+        // Remembered either way. This is the half the player never sees, and
+        // the one that gives a swallowed line an effect on the world: it sorts
+        // by importance into the bot's prompt and colours what it says later.
+        Memory_Remember(h.botGuid, thought, static_cast<uint8_t>(weight));
+
+        if (weight < g_HeldTongueEmoteThreshold || g_HeldTongueEmote.empty())
+            return;
+
+        Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(h.botGuid));
+        if (!bot || !bot->IsInWorld() || !bot->IsAlive())
+            return;
+
+        // World thread, so the emote can go out directly. A custom string
+        // rather than a TEXT_EMOTE_* id: there is no "holds tongue" emote in
+        // 3.3.5, and the stock table would force a compromise like "ponders".
+        const std::string line = SafeFormat(g_HeldTongueEmote,
+                                            fmt::arg("speaker_name", h.speakerName));
+        if (!line.empty() && line != "[Format Error]")
+            bot->TextEmote(line);
+
+        if (g_DebugEnabled)
+            LOG_INFO("module.ollamachat",
+                     "[Ollama Chat] {} held their tongue (weight {}): '{}'",
+                     h.botName, weight, thought);
+    }
+
     // The addressee pass, world-thread half. Reads {"to":["name", ...]} out of
     // the lane's answer and submits the real replies for whoever was addressed.
     //
@@ -484,7 +591,10 @@ namespace
                 takeAll();
         }
 
-        uint32_t spoken = 0;
+        uint32_t            spoken = 0;
+        std::vector<size_t> spokeIdx;
+        std::string         firstSpeakerName;
+
         for (size_t idx : speakers)
         {
             if (idx >= a.candidateGuids.size())
@@ -500,6 +610,9 @@ namespace
                                      a.chainDepth, a.scopeKey, a.senderIsBot))
             {
                 ++spoken;
+                spokeIdx.push_back(idx);
+                if (firstSpeakerName.empty())
+                    firstSpeakerName = bot->GetName();
                 if (parsed && a.maxSpeakers > 0 && spoken >= a.maxSpeakers)
                     break;
             }
@@ -509,6 +622,57 @@ namespace
             LOG_INFO("module.ollamachat",
                      "[Ollama Chat] Addressee pass: {} candidates, {} named, parsed={}, {} speaking.",
                      a.candidateGuids.size(), named.size(), parsed, spoken);
+
+        // Everyone who was in the running and did not end up speaking wanted to
+        // answer and did not (plan 25 item 48).
+        //
+        // Only when the pass actually CHOSE. On the fallback path every
+        // candidate speaks, so nobody held anything back -- and asking then
+        // would spend a call to describe a silence that never happened.
+        if (!g_HeldTongueEnable || !parsed || spoken == 0 || firstSpeakerName.empty() ||
+            g_HeldTonguePrompt.empty())
+            return;
+
+        // Same generator as the room-pick above rather than the core's urand:
+        // this file pulls in no core random header, and one chance roll is not
+        // worth an include when <random> is already here.
+        std::random_device heldRd;
+        std::mt19937       heldGen(heldRd());
+        std::uniform_int_distribution<uint32_t> heldRoll(0, 99);
+
+        for (size_t i = 0; i < a.candidateGuids.size(); ++i)
+        {
+            bool spokeHere = false;
+            for (size_t s : spokeIdx)
+                if (s == i)
+                    spokeHere = true;
+            if (spokeHere)
+                continue;
+
+            if (heldRoll(heldGen) >= g_HeldTongueChance)
+                continue;
+
+            Player* quiet = ObjectAccessor::FindConnectedPlayer(ObjectGuid(a.candidateGuids[i]));
+            if (!quiet || !quiet->IsInWorld() || !quiet->IsAlive())
+                continue;
+
+            OllamaHeldTongueRequest h;
+            h.botGuid     = a.candidateGuids[i];
+            h.botName     = quiet->GetName();
+            h.fromName    = sender->GetName();
+            h.message     = a.trimmedMsg;
+            h.speakerName = firstSpeakerName;
+            h.prompt      = SafeFormat(g_HeldTonguePrompt,
+                                       fmt::arg("bot_name", h.botName),
+                                       fmt::arg("from_name", h.fromName),
+                                       fmt::arg("message", h.message),
+                                       fmt::arg("speaker_name", h.speakerName));
+
+            if (h.prompt.empty() || h.prompt == "[Format Error]")
+                continue;
+
+            OllamaDispatch_SubmitHeldTongue(std::move(h));
+        }
     }
 
     void Deliver(const Completion& c, const OllamaWorldSnapshot& world)
@@ -700,6 +864,42 @@ void OllamaDispatch_Stop()
     LOG_INFO("module.ollamachat", "[Ollama Chat] Dispatcher stopped.");
 }
 
+bool OllamaDispatch_SubmitHeldTongue(OllamaHeldTongueRequest request)
+{
+    if (request.prompt.empty() || request.botGuid == 0)
+        return false;
+
+    Task task;
+    task.type       = TaskType::HeldTongue;
+    task.heldTongue = std::move(request);
+
+    task.request.prompt  = task.heldTongue.prompt;
+    task.request.kind    = OllamaRequestKind::Classify;
+    task.request.botGuid = task.heldTongue.botGuid;
+    task.request.botName = task.heldTongue.botName;
+
+    {
+        std::lock_guard<std::mutex> lock(g_queueMutex);
+
+        if (!g_running)
+            return false;
+
+        // A stricter allowance than a reply gets: this is upkeep, and it must
+        // never crowd out a line someone is actually waiting to hear.
+        if (g_MaxQueueDepth > 0 && g_queue.size() >= g_MaxQueueDepth / 2)
+        {
+            ++g_droppedQueueFull;
+            return false;
+        }
+
+        g_queue.push_back(std::move(task));
+    }
+
+    ++g_totalSubmitted;
+    g_queueCv.notify_one();
+    return true;
+}
+
 bool OllamaDispatch_SubmitAddressee(OllamaAddresseeRequest request)
 {
     if (request.prompt.empty() || request.candidateGuids.empty())
@@ -846,6 +1046,8 @@ void OllamaDispatch_Update(uint32_t /*diff*/)
             // replies it submits come back through this same queue afterwards.
             if (c.isClassify)
                 ResolveAddressee(c);
+            else if (c.isHeldTongue)
+                ResolveHeldTongue(c);
             else
                 Deliver(c, world);
         }

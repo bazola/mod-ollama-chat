@@ -66,6 +66,23 @@ void Memory_NoteExchange(uint64_t botGuid, uint64_t otherGuid,
                          const std::string& incomingMessage,
                          const std::string& botReply);
 
+// Record one thing a bot will remember, without going through condensation.
+//
+// Condensation is the only writer this store has ever had, and it produces
+// memories in batches from accumulated history. A held tongue (plan 25 item 48)
+// is a single fact that exists at one moment and would be gone by the time
+// history was distilled, so it needs a direct way in.
+//
+// Importance is the model's own weight for the thought, 1..10, which is what
+// Memory_BuildPromptSection sorts on -- so a thought that mattered outranks
+// idle ones inside the prompt's token budget.
+//
+// Trims to Memory.MaxPerBot itself, dropping the least important: the cap is
+// otherwise only applied on the condensation path, which may never run.
+//
+// Thread-safe. Marks the bot dirty so the periodic save persists it.
+void Memory_Remember(uint64_t botGuid, const std::string& text, uint8_t importance);
+
 // Prompt fragments. World thread only.
 //
 // `about` may be null; when set, that person's relationship line is listed

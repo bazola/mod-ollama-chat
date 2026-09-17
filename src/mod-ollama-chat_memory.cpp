@@ -255,6 +255,40 @@ void Memory_Load()
     }
 }
 
+void Memory_Remember(uint64_t botGuid, const std::string& text, uint8_t importance)
+{
+    if (!g_MemoryEnable || botGuid == 0 || text.empty())
+        return;
+
+    BotMemoryEntry entry;
+    entry.text       = text;
+    entry.importance = importance < 1 ? 1 : (importance > 10 ? 10 : importance);
+    entry.createdAt  = uint64_t(time(nullptr));
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    OllamaMemoryState& state = g_state[botGuid];
+    state.memories.push_back(std::move(entry));
+
+    // The cap is enforced on the condensation path only, and a bot that never
+    // condenses would otherwise accumulate these without limit. Drop the least
+    // important rather than the oldest: a trivial thought from a minute ago is
+    // worth less than something that mattered yesterday.
+    if (g_MemoryMaxPerBot > 0 && state.memories.size() > g_MemoryMaxPerBot)
+    {
+        std::sort(state.memories.begin(), state.memories.end(),
+                  [](const BotMemoryEntry& a, const BotMemoryEntry& b)
+                  {
+                      if (a.importance != b.importance)
+                          return a.importance > b.importance;
+                      return a.createdAt > b.createdAt;
+                  });
+        state.memories.resize(g_MemoryMaxPerBot);
+    }
+
+    state.dirty = true;
+}
+
 void Memory_SaveAll()
 {
     std::lock_guard<std::mutex> lock(g_mutex);

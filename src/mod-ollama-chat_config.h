@@ -281,6 +281,16 @@ extern std::string g_AddresseePromptTemplate;
 extern bool        g_InitiateEnable;
 extern uint32_t    g_InitiateChance;
 extern std::string g_InitiateDirective;
+
+// A held tongue (plan 25 item 48). When the addressee pass picks one speaker out
+// of several, the others wanted to answer and did not. The cheap lane writes
+// what they kept back and weighs how much it mattered, in one JSON answer.
+// Above the threshold it surfaces as an emote; below it, it is only remembered.
+extern bool        g_HeldTongueEnable;
+extern uint32_t    g_HeldTongueChance;
+extern uint32_t    g_HeldTongueEmoteThreshold;
+extern std::string g_HeldTonguePrompt;
+extern std::string g_HeldTongueEmote;
 extern std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------

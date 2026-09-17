@@ -655,6 +655,58 @@ OllamaChat.Initiate.Chance = 25
 #   Default:     the wording compiled in, which an absent or empty key restores.
 OllamaChat.Initiate.Directive = " Speak to {target_name} directly, by name, as though opening a conversation with them rather than remarking to the room."
 
+# OllamaChat.HeldTongue.Enable
+#   Description: A held tongue (plan 25 item 48). When the addressee pass picks
+#                one speaker out of several candidates, the others wanted to
+#                answer and did not. This asks the cheap lane what each of them
+#                kept back, and how much it mattered, in one JSON answer:
+#                {"thought": "...", "weight": 0-10}.
+#
+#                Above EmoteThreshold it surfaces as an emote -- the player sees
+#                that something was withheld, never what. Below it, the thought
+#                is only remembered, and colours what that bot says later.
+#
+#                The withheld text is never displayed in either case, so it does
+#                not have to be safe to show. If the lane is down or the JSON
+#                will not parse there is no thought and no emote, and the bot is
+#                simply silent as it is today.
+#
+#                Requires Addressee.Enable, since without the pass there are no
+#                unchosen candidates to have held anything back.
+#   Default:     0
+OllamaChat.HeldTongue.Enable = 0
+
+# OllamaChat.HeldTongue.Chance
+#   Description: Percent of unchosen candidates that get a thought at all. Well
+#                below 100 on purpose: if every silence were meaningful, silence
+#                would stop meaning anything. Each one costs a cheap-lane call.
+#   Default:     35
+OllamaChat.HeldTongue.Chance = 35
+
+# OllamaChat.HeldTongue.EmoteThreshold
+#   Description: Weight (0-10) at or above which the held tongue surfaces as an
+#                emote rather than staying invisible. Raise it to make visible
+#                silences rarer and therefore heavier.
+#   Default:     7
+OllamaChat.HeldTongue.EmoteThreshold = 7
+
+# OllamaChat.HeldTongue.Emote
+#   Description: The emote text, broadcast as "<Bot> <this>". Placeholder:
+#                {speaker_name}, whoever spoke instead. Deliberately says nothing
+#                about WHAT was withheld.
+#   Default:     the wording compiled in, which an absent or empty key restores.
+OllamaChat.HeldTongue.Emote = "holds their tongue and lets {speaker_name} speak"
+
+# OllamaChat.HeldTongue.Prompt
+#   Description: The question put to the cheap lane. Placeholders: {bot_name}
+#                {from_name} {message} {speaker_name}.
+#   BRACES: any brace belonging to the JSON rather than a placeholder MUST be
+#           doubled -- {{"thought":"..."}} -- because this goes through fmt,
+#           where a bare { opens a format field and a mistake replaces the whole
+#           template with the literal text "[Format Error]".
+#   Default:     the wording compiled in, which an absent or empty key restores.
+OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said: \"{message}\"\nYou were about to answer, but {speaker_name} spoke first, so you said nothing.\nIn one short clause, what did you keep to yourself? Then weigh how much it mattered to you: 0 for an idle thought, 10 for something you will carry.\nReply with JSON and nothing else: {{\"thought\":\"...\",\"weight\":0}}"
+
 # OllamaChat.Addressee.PromptTemplate
 #   Description: The question put to the cheap lane. Placeholders: {speaker_name}
 #                {message} {candidates} ({max_names} is also available, though the

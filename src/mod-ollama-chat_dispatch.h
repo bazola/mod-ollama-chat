@@ -118,6 +118,32 @@ struct OllamaAddresseeRequest
 
 bool OllamaDispatch_SubmitAddressee(OllamaAddresseeRequest request);
 
+// A held tongue (plan 25 item 48). When the addressee pass picks one speaker,
+// the candidates it passed over wanted to answer and did not. This asks the
+// cheap lane what one of them kept back and how much it mattered, in a single
+// JSON answer, then either surfaces it as an emote or only remembers it.
+//
+// Same two-stage shape as the addressee pass: submitted from the world thread,
+// answered on a worker, resolved back on the world thread -- which is where
+// both the emote and the memory write have to happen.
+//
+// Nothing here is ever spoken, and the withheld text is never displayed, only
+// the fact of it. A lane that is down or an answer that will not parse means no
+// thought, no emote, and the bot is simply silent as it is today.
+struct OllamaHeldTongueRequest
+{
+    uint64_t    botGuid = 0;
+    std::string botName;
+
+    std::string fromName;      // who said the line that went unanswered
+    std::string message;       // what they said
+    std::string speakerName;   // who answered instead
+
+    std::string prompt;
+};
+
+bool OllamaDispatch_SubmitHeldTongue(OllamaHeldTongueRequest request);
+
 // Drain finished generations and deliver them. World thread only.
 void OllamaDispatch_Update(uint32_t diff);
 

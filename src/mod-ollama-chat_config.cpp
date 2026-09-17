@@ -183,6 +183,11 @@ std::string g_AddresseePromptTemplate;
 bool        g_InitiateEnable          = false;
 uint32_t    g_InitiateChance          = 25;
 std::string g_InitiateDirective;
+bool        g_HeldTongueEnable        = false;
+uint32_t    g_HeldTongueChance        = 35;
+uint32_t    g_HeldTongueEmoteThreshold = 7;
+std::string g_HeldTonguePrompt;
+std::string g_HeldTongueEmote;
 std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------
@@ -1064,6 +1069,22 @@ void LoadOllamaChatConfig()
         "OllamaChat.Initiate.Directive",
         " Speak to {target_name} directly, by name, as though opening a conversation "
         "with them rather than remarking to the room.");
+
+    // A held tongue. The braces that belong to the JSON are doubled: this goes
+    // through SafeFormat, which is fmt::vformat, where a bare { opens a format
+    // field and the whole template comes back as "[Format Error]".
+    g_HeldTongueEnable         = sConfigMgr->GetOption<bool>("OllamaChat.HeldTongue.Enable", false);
+    g_HeldTongueChance         = sConfigMgr->GetOption<uint32_t>("OllamaChat.HeldTongue.Chance", 35);
+    g_HeldTongueEmoteThreshold = sConfigMgr->GetOption<uint32_t>("OllamaChat.HeldTongue.EmoteThreshold", 7);
+    g_HeldTongueEmote          = sConfigMgr->GetOption<std::string>(
+        "OllamaChat.HeldTongue.Emote", "holds their tongue and lets {speaker_name} speak");
+    g_HeldTonguePrompt         = sConfigMgr->GetOption<std::string>(
+        "OllamaChat.HeldTongue.Prompt",
+        "You are {bot_name}, in Azeroth. {from_name} said: \"{message}\"\n"
+        "You were about to answer, but {speaker_name} spoke first, so you said nothing.\n"
+        "In one short clause, what did you keep to yourself? Then weigh how much it "
+        "mattered to you: 0 for an idle thought, 10 for something you will carry.\n"
+        "Reply with JSON and nothing else: {{\"thought\":\"...\",\"weight\":0}}");
 
     // --- Roleplay-mode variation lists -----------------------------------
     // These replace the shipped out-of-character lists at strictness 2. The

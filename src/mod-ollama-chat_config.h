@@ -288,7 +288,6 @@ extern std::string g_InitiateDirective;
 // Above the threshold it surfaces as an emote; below it, it is only remembered.
 extern bool        g_HeldTongueEnable;
 extern uint32_t    g_HeldTongueChance;
-extern uint32_t    g_HeldTongueEmoteThreshold;
 extern std::string g_HeldTonguePrompt;
 extern std::string g_HeldTongueEmote;
 extern std::vector<std::string> g_RoleplayQuestionVariations;

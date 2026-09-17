@@ -662,9 +662,10 @@ OllamaChat.Initiate.Directive = " Speak to {target_name} directly, by name, as t
 #                kept back, and how much it mattered, in one JSON answer:
 #                {"thought": "...", "weight": 0-10}.
 #
-#                Above EmoteThreshold it surfaces as an emote -- the player sees
-#                that something was withheld, never what. Below it, the thought
-#                is only remembered, and colours what that bot says later.
+#                When the answer says it mattered, it surfaces as an emote -- the
+#                player sees that something was withheld, never what. When it did
+#                not, the thought is only remembered, and colours what that bot
+#                says later.
 #
 #                The withheld text is never displayed in either case, so it does
 #                not have to be safe to show. If the lane is down or the JSON
@@ -683,12 +684,12 @@ OllamaChat.HeldTongue.Enable = 0
 #   Default:     35
 OllamaChat.HeldTongue.Chance = 35
 
-# OllamaChat.HeldTongue.EmoteThreshold
-#   Description: Weight (0-10) at or above which the held tongue surfaces as an
-#                emote rather than staying invisible. Raise it to make visible
-#                silences rarer and therefore heavier.
-#   Default:     7
-OllamaChat.HeldTongue.EmoteThreshold = 7
+# (There is no EmoteThreshold. The model answers "mattered": true or false, and
+#  the emote fires on true. A 0-10 scale was tried first and abandoned: it
+#  returned 7 for every band of test line, so 7 of 7 would have fired and the
+#  threshold would have been decorative. A three-way taxonomy was tried next and
+#  agreed with itself on only 3 of 10 cases. The plain question is both stable
+#  and correct against the thought the bot actually invented.)
 
 # OllamaChat.HeldTongue.Emote
 #   Description: The emote text, broadcast as "<Bot> <this>". Placeholder:
@@ -705,7 +706,11 @@ OllamaChat.HeldTongue.Emote = "holds their tongue and lets {speaker_name} speak"
 #           where a bare { opens a format field and a mistake replaces the whole
 #           template with the literal text "[Format Error]".
 #   Default:     the wording compiled in, which an absent or empty key restores.
-OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said: \"{message}\"\nYou were about to answer, but {speaker_name} spoke first, so you said nothing.\nIn one short clause, what did you keep to yourself? Then weigh how much it mattered to you: 0 for an idle thought, 10 for something you will carry.\nReply with JSON and nothing else: {{\"thought\":\"...\",\"weight\":0}}"
+#   Answer shape: {"thought": "...", "mattered": true|false}. The emote fires on
+#                 true; false is remembered and nothing is shown. A string
+#                 "true"/"yes" is accepted too, since some models answer the
+#                 boolean as text.
+OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said: \"{message}\"\nYou were about to answer, but {speaker_name} spoke first, so you said nothing.\nIn one short clause, what did you keep to yourself?\nThen answer one thing: did what you swallowed matter to you personally, or was it just a passing thought?\nReply with JSON and nothing else: {{\"thought\":\"...\",\"mattered\":false}}"
 
 # OllamaChat.Addressee.PromptTemplate
 #   Description: The question put to the cheap lane. Placeholders: {speaker_name}

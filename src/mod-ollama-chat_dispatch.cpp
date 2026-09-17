@@ -424,7 +424,7 @@ namespace
             return;                 // lane down: no thought, no emote
 
         std::string thought;
-        uint32_t    weight = 0;
+        bool        mattered = false;
 
         const size_t open  = c.text.find('{');
         const size_t close = c.text.rfind('}');
@@ -439,15 +439,21 @@ namespace
             if (t != j.end() && t->is_string())
                 thought = t->get<std::string>();
 
-            const auto w = j.find("weight");
-            if (w != j.end() && w->is_number())
+            // A yes or no, not a number. Some models answer the boolean as a
+            // string, so both forms are accepted; anything else leaves it false
+            // and the thought is merely remembered.
+            const auto m = j.find("mattered");
+            if (m != j.end())
             {
-                // Plain comparison rather than std::max: <algorithm> is not
-                // included here, and a model that answers -1 or 99 should be
-                // clamped rather than trusted.
-                const double raw = w->get<double>();
-                weight = raw <= 0.0 ? 0u
-                       : (raw >= 10.0 ? 10u : static_cast<uint32_t>(raw));
+                if (m->is_boolean())
+                {
+                    mattered = m->get<bool>();
+                }
+                else if (m->is_string())
+                {
+                    const std::string s = m->get<std::string>();
+                    mattered = (s == "true" || s == "True" || s == "yes" || s == "Yes");
+                }
             }
         }
         catch (const std::exception&)
@@ -461,9 +467,12 @@ namespace
         // Remembered either way. This is the half the player never sees, and
         // the one that gives a swallowed line an effect on the world: it sorts
         // by importance into the bot's prompt and colours what it says later.
-        Memory_Remember(h.botGuid, thought, static_cast<uint8_t>(weight));
+        // Remembered either way. There is no calibrated number any more, just
+        // two levels: what mattered outranks what did not when
+        // Memory_BuildPromptSection has to fit its token budget.
+        Memory_Remember(h.botGuid, thought, mattered ? 7 : 3);
 
-        if (weight < g_HeldTongueEmoteThreshold || g_HeldTongueEmote.empty())
+        if (!mattered || g_HeldTongueEmote.empty())
             return;
 
         Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(h.botGuid));
@@ -480,8 +489,8 @@ namespace
 
         if (g_DebugEnabled)
             LOG_INFO("module.ollamachat",
-                     "[Ollama Chat] {} held their tongue (weight {}): '{}'",
-                     h.botName, weight, thought);
+                     "[Ollama Chat] {} held their tongue (mattered={}): '{}'",
+                     h.botName, mattered, thought);
     }
 
     // The addressee pass, world-thread half. Reads {"to":["name", ...]} out of

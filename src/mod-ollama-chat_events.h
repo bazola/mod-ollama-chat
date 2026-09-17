@@ -25,8 +25,11 @@ public:
     void DispatchGameEvent(Player* source, std::string type, std::string detail);
 
     // World thread only -- reads live world state.
+    // outMaxWords, when non-null, receives the word cap of the length
+    // instruction drawn for this reaction (0 = none).
     std::string BuildPrompt(Player* bot, std::string promptTemplate, std::string eventType,
-                            std::string eventDetail, std::string actorName);
+                            std::string eventDetail, std::string actorName,
+                            uint32_t* outMaxWords = nullptr);
 };
 
 class ChatOnKill : public PlayerScript

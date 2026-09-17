@@ -9,6 +9,7 @@
 #include "mod-ollama-chat_personality.h"
 #include "mod-ollama-chat_roleplay.h"
 #include "mod-ollama-chat_sentiment.h"
+#include "mod-ollama-chat_response.h"
 #include "mod-ollama-chat_topics.h"
 #include "mod-ollama-chat-utilities.h"
 
@@ -272,8 +273,9 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
 
         // Built here, on the world thread. The old code built the whole prompt
         // inside the worker, reading area, zone, spec and guild off-thread.
+        uint32_t maxWords = 0;
         std::string prompt = BuildPrompt(bot, g_EventChatterPromptTemplate, type, detail,
-                                         source->GetName());
+                                         source->GetName(), &maxWords);
         if (prompt.empty())
             continue;
 
@@ -286,6 +288,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
         request.prompt      = std::move(prompt);
         request.botName     = bot->GetName();
         request.kind        = OllamaRequestKind::EventChatter;
+        request.maxWords    = maxWords;
         request.triggerBotReplies = true;
 
         if (!OllamaDispatch_Submit(std::move(request)))
@@ -302,7 +305,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
 
 std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTemplate,
                                                std::string eventType, std::string eventDetail,
-                                               std::string actorName)
+                                               std::string actorName, uint32_t* outMaxWords)
 {
     if (!bot || promptTemplate.empty())
         return "";
@@ -346,6 +349,20 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
     prompt += Regard_CompanySection(bot, actor, false);
     prompt += Roleplay_BuildVoicePrompt(bot);
     prompt += Expression_BuildGesturePrompt();
+
+    // Drawn last, like the reply and emote paths, so it is the final
+    // instruction the model reads. The "@N" comes back out so ClampReplyWords
+    // can hold the reaction to it; the template's own "under 20 words" has been
+    // removed, because a fixed length there beats whatever is drawn here.
+    if (!g_EventRegisters.empty())
+    {
+        std::string reg = g_EventRegisters[urand(0, static_cast<uint32_t>(g_EventRegisters.size() - 1))];
+        const uint32_t cap = TakeWordCap(reg);
+        if (outMaxWords)
+            *outMaxWords = cap;
+        prompt += " " + reg;
+    }
+
     return prompt;
 }
 

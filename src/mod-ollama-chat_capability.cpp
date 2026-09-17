@@ -371,6 +371,7 @@ bool OllamaCapability_ShouldThink(OllamaRequestKind kind)
         case OllamaRequestKind::ChatReply:
         case OllamaRequestKind::RandomChatter:
         case OllamaRequestKind::EventChatter:
+        case OllamaRequestKind::Classify:
         default:
             return false;   // short, latency-sensitive, nothing to reason about
     }

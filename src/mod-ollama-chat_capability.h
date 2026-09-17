@@ -34,6 +34,11 @@ enum class OllamaRequestKind : uint8_t
     EventChatter,
     Sentiment,
     RoleplayReply,
+
+    // Not a spoken line: a question asked about a line, answered in JSON and
+    // never shown to anyone. Routed to the cheap lane when one is configured,
+    // and never allowed to think.
+    Classify,
 };
 
 enum class OllamaThinkSupport : uint8_t

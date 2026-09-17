@@ -77,6 +77,13 @@ bool Governor_CanSend(ObjectGuid botGuid, const std::string& scopeKey,
 bool Governor_IsRepetitive(ObjectGuid botGuid, const std::string& scopeKey,
                            const std::string& text);
 
+// True when this scope heard the same opener recently. The opener half of
+// Governor_IsRepetitive on its own, so a path that must not suppress a whole
+// answer can still refuse a line that starts like the last one. Scope history
+// records no speaker, so this cannot tell "another bot said it" from "this bot
+// is repeating itself" -- it answers only "was this opener just used here".
+bool Governor_HasOpenerCollision(const std::string& scopeKey, const std::string& text);
+
 void Governor_RecordUtterance(ObjectGuid botGuid, const std::string& scopeKey,
                               const std::string& text);
 

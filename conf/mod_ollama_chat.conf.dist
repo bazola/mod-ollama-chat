@@ -43,6 +43,20 @@ OllamaChat.Url = http://localhost:11434/api/generate
 #     Default:     llama3.2:1b
 OllamaChat.Model = llama3.2:1b
 
+# OllamaChat.Utility.Url / OllamaChat.Utility.Model
+#   Description: The cheap lane, for request kinds that are not spoken lines --
+#                a question asked ABOUT a line, answered in JSON and never shown
+#                to anyone. Those want a small fast model; the model above is
+#                chosen for character, which a label does not need.
+#   Url:   Optional. Empty means the lane shares OllamaChat.Url, so a second
+#          model on the same backend needs only the model name below.
+#   Model: Empty (the default) means there is no lane at all and every request
+#          keeps using OllamaChat.Model, so nothing changes until this is set.
+#   Note:  A routed request never thinks. The think-capability probe describes
+#          OllamaChat.Model only, so nothing it learned is true of this model.
+OllamaChat.Utility.Url =
+OllamaChat.Utility.Model =
+
 # OllamaChat.NumPredict
 #     Description: Maximum number of tokens to generate in Ollama responses.
 #     0 = unlimited. Only set if you want a hard cap.
@@ -557,6 +571,24 @@ OllamaChat.ChatExtraInfoTemplate = "Your Info: {bot_race} {bot_gender}, Spec: {b
 #   Default: the ten entries below, which are also compiled in as the fallback when this key
 #            is absent or empty, so removing it changes nothing.
 OllamaChat.ReplyRegisters = Answer in a few words.@12|Answer in a few words.@12|Answer in a few words.@12|Answer in a few words.@12|Answer in a sentence or two, under twenty-five words.@30|Answer in a sentence or two, under twenty-five words.@30|Answer in a sentence or two, under twenty-five words.@30|Answer in up to forty words if what they said deserves it; otherwise keep it short.@45|Answer in up to forty words if what they said deserves it; otherwise keep it short.@45|If they asked how something in this world works, explain it properly, up to sixty words; otherwise keep it short.@65
+
+# OllamaChat.EmoteRegisters
+#   Description: The same idea as ReplyRegisters, for a bot reacting to a gesture
+#                made at it. Shorter throughout: a reaction to a wave is a glance
+#                and a word back, so the longest entry here is still shorter than
+#                the reply path's shortest.
+#   Note: EmoteReactionPromptTemplate must not also fix a length. While it said
+#         "in under 12 words" the template won and these did nothing.
+#   Default: the five entries below, compiled in as the fallback.
+OllamaChat.EmoteRegisters = React in a word or two.@6|React in a word or two.@6|React in a short line.@12|React in a short line.@12|React in a line, and say what you make of it.@20
+
+# OllamaChat.EventRegisters
+#   Description: The same, for a bot reacting to something that just happened in
+#                front of it. More room than an emote, less than a reply.
+#   Note: EventChatterPromptTemplate must not also fix a length, for the same
+#         reason -- it used to say "in one short line, under 20 words".
+#   Default: the five entries below, compiled in as the fallback.
+OllamaChat.EventRegisters = React in a few words.@12|React in a few words.@12|React in a short line.@20|React in a short line.@20|React in a line or two, if what happened deserves it.@30
 
 # --------------------------------------------
 # ENVIRONMENTAL/CONTEXTUAL TEMPLATES
@@ -1247,6 +1279,26 @@ OllamaChat.Repetition.WindowSeconds = 1800
 #        similarity scoring misses.
 #        Default: 8
 OllamaChat.Repetition.OpenerHistorySize = 8
+
+#    OllamaChat.Repetition.OpenerCheckDirectAddress
+#        Whether the opener check above also applies to direct address -- a
+#        whisper, a bot named by name, or any line in a party of
+#        Cooldown.DirectAddressGroupSize or fewer.
+#
+#        Whole-line repetition suppression is deliberately skipped for direct
+#        address: ask a bot the same question twice and the same answer is
+#        correct, and suppressing it leaves the asker staring at silence. But an
+#        opener is not an answer. Measured in a party of three, ten of
+#        thirty-one lines opened "Aye." and one bot did so eight times in
+#        nineteen, because every line in a small party is direct address and
+#        skipped the check entirely.
+#
+#        The trade this makes: a suppressed reply is silence, and scope history
+#        records no speaker, so this cannot tell "another bot just said it" from
+#        "this bot is repeating itself". Set to 0 if you would rather hear a
+#        repeated opener than lose the odd answer.
+#        Default: 1
+OllamaChat.Repetition.OpenerCheckDirectAddress = 1
 
 ###############################################################################
 #

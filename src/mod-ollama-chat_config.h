@@ -45,6 +45,11 @@ extern uint32_t   g_EventChatterMaxBotsPerPlayer;
 // --------------------------------------------
 extern std::string g_OllamaUrl;
 extern std::string g_OllamaModel;
+// The cheap lane, for request kinds that are not spoken lines. An empty model
+// means there is no lane and every kind keeps using g_OllamaModel; an empty url
+// means the lane shares g_OllamaUrl.
+extern std::string g_UtilityUrl;
+extern std::string g_UtilityModel;
 extern uint32_t    g_OllamaNumPredict;
 extern float       g_OllamaTemperature;
 extern float       g_OllamaTopP;
@@ -201,6 +206,10 @@ extern uint32_t g_ScopeHistorySize;
 extern float    g_RepetitionSimilarityThreshold;
 extern uint32_t g_RepetitionWindowSeconds;
 extern uint32_t g_OpenerHistorySize;
+// Whether the opener check also applies to direct address. Whole-line
+// suppression never does -- the same question deserves the same answer -- but
+// an opener is not an answer. Costs the occasional reply; see the conf.
+extern bool     g_OpenerCheckDirectAddress;
 
 // --------------------------------------------
 // Topic engine
@@ -252,6 +261,10 @@ extern std::vector<std::string> g_RoleplayPromptVariations;
 // One is drawn per reply and appended last, so a bot answering a player can be curt or
 // expansive as the moment asks. Without it every reply came out at one fixed length.
 extern std::vector<std::string> g_ReplyRegisters;
+// The same idea for the two paths that had one fixed length compiled into their
+// template: a gesture reacted to, and an event witnessed.
+extern std::vector<std::string> g_EmoteRegisters;
+extern std::vector<std::string> g_EventRegisters;
 extern std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------

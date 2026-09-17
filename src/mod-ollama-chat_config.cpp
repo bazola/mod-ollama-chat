@@ -50,6 +50,8 @@ uint32_t   g_EventChatterMaxBotsPerPlayer    = 2;
 // --------------------------------------------
 std::string g_OllamaUrl        = "http://localhost:11434/api/generate";
 std::string g_OllamaModel      = "llama3.2:1b";
+std::string g_UtilityUrl;
+std::string g_UtilityModel;
 uint32_t    g_OllamaNumPredict = 40;
 float       g_OllamaTemperature = 0.8f;
 float       g_OllamaTopP = 0.95f;
@@ -123,6 +125,7 @@ uint32_t g_ScopeHistorySize              = 30;
 float    g_RepetitionSimilarityThreshold = 0.72f;
 uint32_t g_RepetitionWindowSeconds       = 1800;
 uint32_t g_OpenerHistorySize             = 8;
+bool     g_OpenerCheckDirectAddress      = true;
 
 // --------------------------------------------
 // Topic engine
@@ -172,6 +175,8 @@ std::string g_RoleplayMetaTermList;
 bool        g_RoleplayCrossFactionGibberish = true;
 std::vector<std::string> g_RoleplayPromptVariations;
 std::vector<std::string> g_ReplyRegisters;
+std::vector<std::string> g_EmoteRegisters;
+std::vector<std::string> g_EventRegisters;
 std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------
@@ -529,6 +534,11 @@ void LoadOllamaChatConfig()
     g_MaxBotsToPick                   = sConfigMgr->GetOption<uint32_t>("OllamaChat.MaxBotsToPick", 2);
     g_OllamaUrl                       = sConfigMgr->GetOption<std::string>("OllamaChat.Url", "http://localhost:11434/api/generate");
     g_OllamaModel                     = sConfigMgr->GetOption<std::string>("OllamaChat.Model", "llama3.2:1b");
+
+    // The cheap lane, used by request kinds that are not spoken lines. Empty
+    // model means no lane at all and every kind keeps the model above.
+    g_UtilityUrl                      = sConfigMgr->GetOption<std::string>("OllamaChat.Utility.Url", "");
+    g_UtilityModel                    = sConfigMgr->GetOption<std::string>("OllamaChat.Utility.Model", "");
     g_OllamaNumPredict                = sConfigMgr->GetOption<uint32_t>("OllamaChat.NumPredict", 40);
     g_OllamaTemperature               = sConfigMgr->GetOption<float>("OllamaChat.Temperature", 0.8f);
     g_OllamaTopP                      = sConfigMgr->GetOption<float>("OllamaChat.TopP", 0.95f);
@@ -741,6 +751,7 @@ void LoadOllamaChatConfig()
     g_RepetitionSimilarityThreshold   = sConfigMgr->GetOption<float>("OllamaChat.Repetition.SimilarityThreshold", 0.72f);
     g_RepetitionWindowSeconds         = sConfigMgr->GetOption<uint32_t>("OllamaChat.Repetition.WindowSeconds", 1800);
     g_OpenerHistorySize               = sConfigMgr->GetOption<uint32_t>("OllamaChat.Repetition.OpenerHistorySize", 8);
+    g_OpenerCheckDirectAddress        = sConfigMgr->GetOption<bool>("OllamaChat.Repetition.OpenerCheckDirectAddress", true);
 
     // --- Topic engine ----------------------------------------------------
     g_TopicWeightPeople               = sConfigMgr->GetOption<uint32_t>("OllamaChat.Topic.WeightPeople", 30);
@@ -992,6 +1003,26 @@ void LoadOllamaChatConfig()
         "Answer in up to forty words if what they said deserves it; otherwise keep it short.@45",
         "Answer in up to forty words if what they said deserves it; otherwise keep it short.@45",
         "If they asked how something in this world works, explain it properly, up to sixty words; otherwise keep it short.@65",
+    });
+
+    // An emote reaction is a glance and a word back, so these stay short: the
+    // longest here is still shorter than the reply path's shortest.
+    g_EmoteRegisters = LoadEnvCommentVector("OllamaChat.EmoteRegisters", {
+        "React in a word or two.@6",
+        "React in a word or two.@6",
+        "React in a short line.@12",
+        "React in a short line.@12",
+        "React in a line, and say what you make of it.@20",
+    });
+
+    // Event chatter answers something that just happened in front of the bot:
+    // more room than an emote, less than a reply.
+    g_EventRegisters = LoadEnvCommentVector("OllamaChat.EventRegisters", {
+        "React in a few words.@12",
+        "React in a few words.@12",
+        "React in a short line.@20",
+        "React in a short line.@20",
+        "React in a line or two, if what happened deserves it.@30",
     });
 
     // --- Roleplay-mode variation lists -----------------------------------

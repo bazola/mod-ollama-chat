@@ -43,7 +43,7 @@ void AppendBotConversation(uint64_t botGuid, uint64_t playerGuid,
 // Prompt builders. World thread only -- they read live world state.
 // outMaxWords, when non-null, receives the word cap of the length instruction drawn for this reply (0 = none).
 std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* player, uint32_t* outMaxWords = nullptr);
-std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textEmote);
+std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textEmote, uint32_t* outMaxWords = nullptr);
 
 // Bounded, distance-sorted snapshot helpers used by the prompt builders and
 // the topic engine.

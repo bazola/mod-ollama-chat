@@ -2207,7 +2207,7 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
 // Emote reactions
 // --------------------------------------------------------------------------
 
-std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textEmote)
+std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textEmote, uint32_t* outMaxWords)
 {
     if (!bot || !player)
         return "";
@@ -2238,6 +2238,20 @@ std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textE
 
     if (g_RoleplayEnable)
         prompt += Roleplay_BuildVoicePrompt(bot);
+
+    // Same treatment as the reply path: draw a length, append it last, and hand
+    // back the "@N" so the answer is actually held to it. The template used to
+    // carry "under 12 words" itself, which made every reaction the same size --
+    // and a fixed length in the template beats a register, so that text has to
+    // be opened up in the conf for this to do anything.
+    if (!g_EmoteRegisters.empty())
+    {
+        std::string reg = g_EmoteRegisters[urand(0, static_cast<uint32_t>(g_EmoteRegisters.size() - 1))];
+        const uint32_t cap = TakeWordCap(reg);
+        if (outMaxWords)
+            *outMaxWords = cap;
+        prompt += " " + reg;
+    }
 
     return prompt;
 }

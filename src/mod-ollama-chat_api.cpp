@@ -229,6 +229,8 @@ void OllamaConfig_Publish()
     next.minP             = g_OllamaMinP;
     next.presencePenalty  = g_OllamaPresencePenalty;
     next.frequencyPenalty = g_OllamaFrequencyPenalty;
+    next.utilityUrl       = g_UtilityUrl;
+    next.utilityModel     = g_UtilityModel;
 
     std::lock_guard<std::mutex> lock(g_settingsMutex);
     g_settings = std::move(next);
@@ -250,11 +252,29 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind)
         return result;
     }
 
-    const OllamaEndpointSettings cfg = OllamaConfig_Snapshot();
+    OllamaEndpointSettings cfg = OllamaConfig_Snapshot();
+
+    // Route to the cheap lane when this kind asks for it and a lane exists.
+    // Done here rather than in BuildRequest so the url moves with the model:
+    // PerformOnce posts to cfg.url, so both have to change together or the
+    // lane's model name is sent to the voice model's backend.
+    const bool routed = (kind == OllamaRequestKind::Classify) && !cfg.utilityModel.empty();
+    if (routed)
+    {
+        cfg.model = cfg.utilityModel;
+        if (!cfg.utilityUrl.empty())
+            cfg.url = cfg.utilityUrl;
+    }
 
     // One place decides what the "think" field should be: policy for this
     // request kind, plus everything learned about this model so far.
-    OllamaThinkRequest think = OllamaCapability_ResolveThink(kind);
+    //
+    // A routed request skips that entirely. The capability cache is keyed on
+    // one (url, model) pair -- the voice model's -- so everything it learned
+    // is a statement about a different model than the one about to be asked.
+    // A classifier should not reason in any case.
+    OllamaThinkRequest think = routed ? OllamaThinkRequest{}
+                                      : OllamaCapability_ResolveThink(kind);
 
     // Reasoning tokens come out of the same num_predict budget as the answer.
     // Reserve headroom whenever we expect them -- because reasoning was asked
@@ -301,10 +321,13 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind)
     if (result.ok && result.text.empty() && !result.thinking.empty() &&
         cfg.numPredict > 0 && reserve == 0 && g_ReasoningTokenReserve > 0)
     {
-        if (!think.wanted)
+        // Never learn from the lane: what the lane's model does is not
+        // evidence about the voice model the cache describes.
+        if (!routed && !think.wanted)
             OllamaCapability_NoteUnconditionalReasoning();
 
-        think  = OllamaCapability_ResolveThink(kind);
+        if (!routed)
+            think = OllamaCapability_ResolveThink(kind);
         result = perform(think, g_ReasoningTokenReserve);
     }
 

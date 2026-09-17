@@ -375,6 +375,27 @@ namespace
             return;
         }
 
+        // The whole answer is spared above, but an opener is not an answer.
+        // Every line in a small party is direct address, so the check never ran
+        // where it was needed most: ten of thirty-one measured lines opened
+        // "Aye.", one bot eight times in nineteen. The history was recorded all
+        // along -- only the looking was skipped.
+        //
+        // This does cost the occasional answer, and scope history records no
+        // speaker, so it cannot tell another bot's opener from the bot's own.
+        // OpenerCheckDirectAddress turns it off for anyone who would rather
+        // hear a repeat than lose a reply.
+        if (directAddress && g_OpenerCheckDirectAddress &&
+            Governor_HasOpenerCollision(c.request.scopeKey, c.text))
+        {
+            ++g_droppedGovernor;
+            if (g_DebugEnabled)
+                LOG_INFO("module.ollamachat",
+                         "[Ollama Chat] Bot {} reply suppressed for a repeated opener: '{}'",
+                         bot->GetName(), c.text);
+            return;
+        }
+
         if (!Governor_TryConsumeSend(botGuid, c.request.scopeKey, directAddress))
         {
             ++g_droppedGovernor;
@@ -631,9 +652,12 @@ void OllamaChat_DispatchEmoteReaction(Player* bot, Player* player, uint32_t text
     // the ambient say cooldown has no business also silencing it.
     request.directAddress = true;
 
-    request.prompt = BuildEmoteReactionPrompt(bot, player, textEmote);
+    uint32_t maxWords = 0;
+    request.prompt = BuildEmoteReactionPrompt(bot, player, textEmote, &maxWords);
     if (request.prompt.empty())
         return;
+
+    request.maxWords = maxWords;
 
     OllamaDispatch_Submit(std::move(request));
 }

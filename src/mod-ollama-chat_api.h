@@ -56,6 +56,14 @@ struct OllamaEndpointSettings
     float   minP             = -1.0f;
     float   presencePenalty  = -1000.0f;
     float   frequencyPenalty = -1000.0f;
+
+    // The cheap lane. A classifier is not a voice: it wants a small fast model
+    // answering in JSON, not the model that gives bots their character. When a
+    // model is set here, request kinds that opt in are sent to it instead --
+    // the url too, if one is given, so the lane can live on another backend.
+    // Empty model = no lane, and every kind keeps using the fields above.
+    std::string utilityUrl;
+    std::string utilityModel;
 };
 
 // Republish from the g_Ollama* globals. Call on the world thread after config

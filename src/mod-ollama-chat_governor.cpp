@@ -512,6 +512,43 @@ bool Governor_IsRepetitive(ObjectGuid botGuid, const std::string& scopeKey,
     return false;
 }
 
+bool Governor_HasOpenerCollision(const std::string& scopeKey, const std::string& text)
+{
+    if (g_OpenerHistorySize == 0)
+        return false;
+
+    const std::string norm = NormalizeText(text);
+    if (norm.empty())
+        return false;
+
+    const std::string opener = OpenerOf(norm);
+    if (opener.empty())
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const TimePoint now = Clock::now();
+
+    auto scopeIt = g_scopes.find(scopeKey);
+    if (scopeIt == g_scopes.end())
+        return false;
+
+    uint32_t checked = 0;
+    for (auto it = scopeIt->second.history.rbegin();
+         it != scopeIt->second.history.rend() && checked < g_OpenerHistorySize;
+         ++it, ++checked)
+    {
+        if (SecondsSince(it->when, now) > double(g_RepetitionWindowSeconds))
+            continue;
+        if (!it->opener.empty() && it->opener == opener)
+        {
+            ++g_stats.blockedRepetition;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void Governor_RecordUtterance(ObjectGuid botGuid, const std::string& scopeKey,
                               const std::string& text)
 {

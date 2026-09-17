@@ -45,6 +45,16 @@ void AppendBotConversation(uint64_t botGuid, uint64_t playerGuid,
 std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* player, uint32_t* outMaxWords = nullptr);
 std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textEmote, uint32_t* outMaxWords = nullptr);
 
+// Build one bot's reply prompt and submit it, exactly as ProcessChat does for a
+// bot that passed its roll. Lifted out so the addressee pass can reuse it: that
+// pass answers on a worker, and the bots it picks must then be submitted from
+// the world thread. Returns false when the governor, an empty prompt or a full
+// queue stopped it. World thread only.
+bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
+                          const std::string& trimmedMsg, ChatChannelSourceLocal sourceLocal,
+                          Channel* channel, uint8_t chainDepth, const std::string& scopeKey,
+                          bool senderIsBot);
+
 // Bounded, distance-sorted snapshot helpers used by the prompt builders and
 // the topic engine.
 std::string GenerateBotGameStateSnapshot(Player* bot);

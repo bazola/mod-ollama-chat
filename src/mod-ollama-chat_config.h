@@ -265,6 +265,13 @@ extern std::vector<std::string> g_ReplyRegisters;
 // template: a gesture reacted to, and an event witnessed.
 extern std::vector<std::string> g_EmoteRegisters;
 extern std::vector<std::string> g_EventRegisters;
+
+// The addressee pass: one cheap call that decides who a line was aimed at,
+// before anyone spends a generation on answering it. Off by default -- it
+// changes who speaks, so it has to earn its place in a playtest first.
+extern bool        g_AddresseeEnable;
+extern uint32_t    g_AddresseeMinCandidates;
+extern std::string g_AddresseePromptTemplate;
 extern std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------

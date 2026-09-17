@@ -10,6 +10,9 @@
 #include "mod-ollama-chat-utilities.h"
 #include "mod-ollama-chat_world.h"
 
+#include <nlohmann/json.hpp>
+#include <random>
+
 #include "CellImpl.h"
 #include "Channel.h"
 #include "ChannelMgr.h"
@@ -41,7 +44,7 @@ namespace
 {
     using Clock = std::chrono::steady_clock;
 
-    enum class TaskType : uint8_t { ChatReply, Sentiment, Condense, Relationship };
+    enum class TaskType : uint8_t { ChatReply, Sentiment, Condense, Relationship, Classify };
 
     struct Task
     {
@@ -59,6 +62,10 @@ namespace
         uint64_t    memoryOtherGuid = 0;
         std::string memoryOtherName;
         std::string memoryPrompt;
+
+        // Addressee-pass payload: everything needed to submit the real replies
+        // once the answer comes back, since ProcessChat's locals are gone by then.
+        OllamaAddresseeRequest addressee;
     };
 
     struct Completion
@@ -67,6 +74,12 @@ namespace
         std::string       text;
         uint32_t          emoteId = 0;
         Clock::time_point deliverAt;
+
+        // An addressee answer is not a spoken line. It comes back through the
+        // same queue so it lands on the world thread, but the drain hands it to
+        // the resolver instead of to Deliver -- nothing here is ever said.
+        bool                   isClassify = false;
+        OllamaAddresseeRequest addressee;
     };
 
     // --- shared state -----------------------------------------------------
@@ -161,6 +174,35 @@ namespace
         g_done.push_back(std::move(completion));
     }
 
+    // The addressee pass, worker half: ask the cheap lane who the line was for.
+    // Nothing here is ever spoken, so there is no response cleanup, no roleplay
+    // filter and no typing delay -- the answer is a label, not a voice.
+    void RunClassifyTask(const Task& task)
+    {
+        OllamaApiResult api = QueryOllama(task.request.prompt, OllamaRequestKind::Classify);
+
+        Completion completion;
+        completion.request    = task.request;
+        completion.isClassify = true;
+        completion.addressee  = task.addressee;
+        completion.deliverAt  = Clock::now();
+
+        if (api.ok)
+        {
+            completion.text = std::move(api.text);
+        }
+        else
+        {
+            // Worth recording, not worth losing the line over: an empty answer
+            // makes the resolver fall back to letting the candidates speak,
+            // which is what would have happened without the pass at all.
+            RecordError(api.error);
+        }
+
+        std::lock_guard<std::mutex> lock(g_doneMutex);
+        g_done.push_back(std::move(completion));
+    }
+
     void RunSentimentTask(const Task& task)
     {
         // Sentiment touches only mutex-guarded in-memory state and async DB
@@ -202,6 +244,9 @@ namespace
                     case TaskType::Relationship:
                         Memory_RunRelationshipUpdate(task.memoryBotGuid, task.memoryOtherGuid,
                                                      task.memoryOtherName, task.memoryPrompt);
+                        break;
+                    case TaskType::Classify:
+                        RunClassifyTask(task);
                         break;
                     default:
                         RunChatTask(task);
@@ -330,6 +375,140 @@ namespace
                     return false;
                 return botAI->Say(c.text);
         }
+    }
+
+    // The addressee pass, world-thread half. Reads {"to":["name", ...]} out of
+    // the lane's answer and submits the real replies for whoever was addressed.
+    //
+    // Every failure here falls back to letting the candidates speak. The pass
+    // may cost a call and change nothing; it must never turn a line into
+    // silence, which would read as the bots being broken.
+    void ResolveAddressee(const Completion& c)
+    {
+        const OllamaAddresseeRequest& a = c.addressee;
+
+        Player* sender = ObjectAccessor::FindConnectedPlayer(ObjectGuid(a.senderGuid));
+        if (!sender)
+            return;
+
+        // ASCII-only fold: 3.3.5 character names are ASCII, and this avoids
+        // dragging locale handling into the dispatcher.
+        auto sameName = [](const std::string& x, const std::string& y)
+        {
+            if (x.size() != y.size())
+                return false;
+            for (size_t i = 0; i < x.size(); ++i)
+            {
+                char cx = x[i], cy = y[i];
+                if (cx >= 'A' && cx <= 'Z') cx = static_cast<char>(cx + 32);
+                if (cy >= 'A' && cy <= 'Z') cy = static_cast<char>(cy + 32);
+                if (cx != cy)
+                    return false;
+            }
+            return true;
+        };
+
+        std::vector<std::string> named;
+        bool parsed = false;
+
+        // The model is asked for bare JSON but may wrap it in a sentence, so
+        // take the outermost braces rather than trusting the whole string.
+        const size_t open  = c.text.find('{');
+        const size_t close = c.text.rfind('}');
+        if (open != std::string::npos && close != std::string::npos && close > open)
+        {
+            try
+            {
+                const nlohmann::json j = nlohmann::json::parse(c.text.substr(open, close - open + 1));
+                const auto to = j.find("to");
+                if (to != j.end() && to->is_array())
+                {
+                    for (const auto& n : *to)
+                        if (n.is_string())
+                            named.push_back(n.get<std::string>());
+                    parsed = true;
+                }
+            }
+            catch (const std::exception&)
+            {
+                parsed = false;
+            }
+        }
+
+        std::vector<size_t> speakers;
+
+        auto takeAll = [&]()
+        {
+            speakers.clear();
+            for (size_t i = 0; i < a.candidateGuids.size(); ++i)
+                speakers.push_back(i);
+        };
+
+        if (!parsed)
+        {
+            takeAll();
+        }
+        else if (named.empty())
+        {
+            // Said to the room rather than to anyone. One voice answers instead
+            // of all of them, which is the point of the pass.
+            if (!a.candidateGuids.empty())
+            {
+                std::random_device rd;
+                std::mt19937 gen(rd());
+                std::uniform_int_distribution<size_t> pick(0, a.candidateGuids.size() - 1);
+                speakers.push_back(pick(gen));
+            }
+        }
+        else
+        {
+            for (const std::string& want : named)
+            {
+                for (size_t i = 0; i < a.candidateNames.size(); ++i)
+                {
+                    if (!sameName(a.candidateNames[i], want))
+                        continue;
+
+                    bool already = false;
+                    for (size_t s : speakers)
+                        if (s == i)
+                            already = true;
+                    if (!already)
+                        speakers.push_back(i);
+                    break;
+                }
+            }
+
+            // Every name it gave was invented. Treat that as no answer at all.
+            if (speakers.empty())
+                takeAll();
+        }
+
+        uint32_t spoken = 0;
+        for (size_t idx : speakers)
+        {
+            if (idx >= a.candidateGuids.size())
+                continue;
+
+            Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(a.candidateGuids[idx]));
+            if (!bot || !bot->IsInWorld() || !bot->IsAlive())
+                continue;
+
+            Channel* channel = a.channelId ? OllamaResolveZoneChannel(bot, a.channelId) : nullptr;
+
+            if (OllamaSubmitBotReply(bot, sender, a.msg, a.trimmedMsg, a.source, channel,
+                                     a.chainDepth, a.scopeKey, a.senderIsBot))
+            {
+                ++spoken;
+                if (parsed && a.maxSpeakers > 0 && spoken >= a.maxSpeakers)
+                    break;
+            }
+        }
+
+        if (g_DebugEnabled)
+            LOG_INFO("module.ollamachat",
+                     "[Ollama Chat] Addressee pass: {} candidates, {} named, parsed={}, {} speaking.",
+                     a.candidateGuids.size(), named.size(), parsed, spoken);
     }
 
     void Deliver(const Completion& c, const OllamaWorldSnapshot& world)
@@ -521,6 +700,44 @@ void OllamaDispatch_Stop()
     LOG_INFO("module.ollamachat", "[Ollama Chat] Dispatcher stopped.");
 }
 
+bool OllamaDispatch_SubmitAddressee(OllamaAddresseeRequest request)
+{
+    if (request.prompt.empty() || request.candidateGuids.empty())
+        return false;
+
+    Task task;
+    task.type      = TaskType::Classify;
+    task.addressee = std::move(request);
+
+    // The worker reads the prompt and kind off task.request like every other
+    // task; the addressee payload carries what the resolver needs afterwards.
+    task.request.prompt  = task.addressee.prompt;
+    task.request.kind    = OllamaRequestKind::Classify;
+    task.request.botName = "addressee pass";
+
+    {
+        std::lock_guard<std::mutex> lock(g_queueMutex);
+
+        if (!g_running)
+            return false;
+
+        if (g_MaxQueueDepth > 0 && g_queue.size() >= g_MaxQueueDepth)
+        {
+            ++g_droppedQueueFull;
+            if (g_DebugEnabled)
+                LOG_INFO("module.ollamachat",
+                         "[Ollama Chat] Queue full ({}); dropping addressee pass.", g_queue.size());
+            return false;
+        }
+
+        g_queue.push_back(std::move(task));
+    }
+
+    ++g_totalSubmitted;
+    g_queueCv.notify_one();
+    return true;
+}
+
 bool OllamaDispatch_Submit(OllamaChatRequest request)
 {
     if (request.prompt.empty() || request.botGuid == 0)
@@ -625,7 +842,12 @@ void OllamaDispatch_Update(uint32_t /*diff*/)
     {
         try
         {
-            Deliver(c, world);
+            // An addressee answer is not a line: it decides who speaks, and the
+            // replies it submits come back through this same queue afterwards.
+            if (c.isClassify)
+                ResolveAddressee(c);
+            else
+                Deliver(c, world);
         }
         catch (const std::exception& e)
         {

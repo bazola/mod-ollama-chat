@@ -7,6 +7,7 @@
 #include "ObjectGuid.h"
 #include <string>
 #include <cstdint>
+#include <vector>
 
 class Player;
 class Channel;
@@ -83,6 +84,39 @@ struct OllamaChatRequest
 // Submit a request. Returns false when the queue is at MaxQueueDepth, in which
 // case the caller should simply skip this bot rather than pile up backlog.
 bool OllamaDispatch_Submit(OllamaChatRequest request);
+
+// The addressee pass: one cheap call that decides who a line was aimed at,
+// before anyone spends a generation answering it.
+//
+// Submitted from the world thread with the bots that passed their rolls,
+// answered on a worker by the cheap lane, and resolved back on the world
+// thread -- which then submits the real replies for whoever was addressed.
+// Everything needed to replay that submission travels in here, because by the
+// time the answer lands, ProcessChat's locals are long gone.
+//
+// Degrades to the old behaviour on any failure: a lane that is down, a reply
+// that will not parse, or a name that matches nobody all fall back to letting
+// every candidate answer, which is exactly what would have happened without
+// the pass.
+struct OllamaAddresseeRequest
+{
+    uint64_t               senderGuid = 0;
+    std::string            msg;
+    std::string            trimmedMsg;
+    ChatChannelSourceLocal source = SRC_SAY_LOCAL;
+    uint32_t               channelId = 0;
+    uint8_t                chainDepth = 0;
+    std::string            scopeKey;
+    bool                   senderIsBot = false;
+
+    std::vector<uint64_t>    candidateGuids;
+    std::vector<std::string> candidateNames;   // parallel to candidateGuids
+    uint32_t                 maxSpeakers = 1;
+
+    std::string prompt;
+};
+
+bool OllamaDispatch_SubmitAddressee(OllamaAddresseeRequest request);
 
 // Drain finished generations and deliver them. World thread only.
 void OllamaDispatch_Update(uint32_t diff);

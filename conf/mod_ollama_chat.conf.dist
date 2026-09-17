@@ -590,6 +590,57 @@ OllamaChat.EmoteRegisters = React in a word or two.@6|React in a word or two.@6|
 #   Default: the five entries below, compiled in as the fallback.
 OllamaChat.EventRegisters = React in a few words.@12|React in a few words.@12|React in a short line.@20|React in a short line.@20|React in a line or two, if what happened deserves it.@30
 
+# OllamaChat.Addressee.Enable
+#   Description: The addressee pass. One cheap call decides who a line was aimed
+#                at, before anyone spends a generation answering it -- so that
+#                three bots stop answering the same sentence at once.
+#
+#                It runs after MaxBotsToPick has already cut the list, and every
+#                failure falls back to letting that list answer: a lane that is
+#                down, a reply that will not parse, or a name matching nobody all
+#                behave exactly as they did before this existed. The pass can
+#                cost a call and change nothing; it can never produce silence.
+#
+#                Answers of the form {"to":["Name"]} pick that bot. {"to":[]}
+#                means the line was for the room, and one bot answers rather than
+#                all of them.
+#
+#                Requires OllamaChat.Utility.Model to be set, or the classify
+#                call runs on the voice model and costs what it was meant to save.
+#   Default:     0 (off -- it changes who speaks, which is too large a change in
+#                how an evening feels to enable unmeasured)
+OllamaChat.Addressee.Enable = 0
+
+# OllamaChat.Addressee.MinCandidates
+#   Description: Skip the pass when fewer than this many bots are in the running.
+#                With one candidate there is nothing to decide, and a line that
+#                names a bot has already narrowed to one before this point.
+#   Default:     2
+OllamaChat.Addressee.MinCandidates = 2
+
+# OllamaChat.Addressee.PromptTemplate
+#   Description: The question put to the cheap lane. Placeholders: {speaker_name}
+#                {message} {candidates} ({max_names} is also available, though the
+#                default below does not use it). It must ask for JSON and nothing
+#                else -- the reply is read as {"to":[...]}, taking the outermost
+#                braces, so a model that wraps its answer in a sentence still parses.
+#
+#   BRACES: any brace that is part of the JSON rather than a placeholder MUST be
+#           doubled -- {{"to":[]}} not {"to":[]}. This string goes through fmt,
+#           where a bare { opens a format field; get it wrong and the whole
+#           template is replaced by the literal text "[Format Error]" and sent to
+#           the model as the prompt.
+#
+#   Wording: measured, not guessed. A version that mentioned the empty answer only
+#            in a trailing clause never produced it once -- every ambiguous line
+#            was assigned to a bot, and the same bot in every candidate order, so
+#            it was a bias toward that name rather than toward the first slot.
+#            Saying plainly that most talk is aimed at no one, and making the empty
+#            answer the default, took it from 2 of 4 to 6 of 6 on lines taken from
+#            a real playtest.
+#   Default:  the wording compiled in, which an absent or empty key restores.
+OllamaChat.Addressee.PromptTemplate = "People are talking in Azeroth. {speaker_name} just said: \"{message}\"\nThese people are close enough to answer: {candidates}\nWas that aimed at one of them in particular? Most talk is not: a remark to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} unless the words name one of them, or plainly answer something only one of them could have said - then answer {{\"to\":[\"name\"]}} with that one name. Reply with JSON and nothing else."
+
 # --------------------------------------------
 # ENVIRONMENTAL/CONTEXTUAL TEMPLATES
 # --------------------------------------------

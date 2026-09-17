@@ -177,6 +177,9 @@ std::vector<std::string> g_RoleplayPromptVariations;
 std::vector<std::string> g_ReplyRegisters;
 std::vector<std::string> g_EmoteRegisters;
 std::vector<std::string> g_EventRegisters;
+bool        g_AddresseeEnable         = false;
+uint32_t    g_AddresseeMinCandidates  = 2;
+std::string g_AddresseePromptTemplate;
 std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------
@@ -1024,6 +1027,28 @@ void LoadOllamaChatConfig()
         "React in a short line.@20",
         "React in a line or two, if what happened deserves it.@30",
     });
+
+    // The addressee pass. Default off: it decides who answers, which is too
+    // large a change in how an evening feels to switch on unmeasured.
+    g_AddresseeEnable        = sConfigMgr->GetOption<bool>("OllamaChat.Addressee.Enable", false);
+    g_AddresseeMinCandidates = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.MinCandidates", 2);
+    // Braces that are part of the JSON, not a placeholder, must be doubled:
+    // SafeFormat is fmt::vformat, so a bare { opens a format field and the whole
+    // template comes back as the literal string "[Format Error]".
+    //
+    // This wording is measured, not guessed. An earlier one mentioned the empty
+    // answer only in a trailing clause and never once produced it -- every
+    // ambiguous line was assigned to a bot. Stating that most talk is aimed at
+    // no one, and making {"to":[]} the default, took it from 2 of 4 to 6 of 6.
+    g_AddresseePromptTemplate = sConfigMgr->GetOption<std::string>(
+        "OllamaChat.Addressee.PromptTemplate",
+        "People are talking in Azeroth. {speaker_name} just said: \"{message}\"\n"
+        "These people are close enough to answer: {candidates}\n"
+        "Was that aimed at one of them in particular? Most talk is not: a remark "
+        "to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} "
+        "unless the words name one of them, or plainly answer something only one "
+        "of them could have said - then answer {{\"to\":[\"name\"]}} with that one "
+        "name. Reply with JSON and nothing else.");
 
     // --- Roleplay-mode variation lists -----------------------------------
     // These replace the shipped out-of-character lists at strictness 2. The

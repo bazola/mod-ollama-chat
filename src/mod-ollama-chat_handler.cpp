@@ -1835,6 +1835,62 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         }
         finalCandidates.resize(countToPick);
     }
+
+    // The addressee pass: one cheap call decides who this line was aimed at,
+    // before anyone spends a generation answering it.
+    //
+    // Deliberately placed AFTER the MaxBotsToPick cut above, so that when the
+    // pass fails -- lane down, answer unparseable, a name matching nobody --
+    // the fallback is exactly the set that would have answered without it,
+    // never a wider one.
+    //
+    // Nothing to decide, no call: one candidate needs no choosing, and a line
+    // that named a bot already short-circuited to a single candidate earlier.
+    if (g_AddresseeEnable && !g_AddresseePromptTemplate.empty() &&
+        finalCandidates.size() >= 2 &&
+        finalCandidates.size() >= g_AddresseeMinCandidates)
+    {
+        OllamaAddresseeRequest pass;
+        pass.senderGuid  = player->GetGUID().GetRawValue();
+        pass.msg         = msg;
+        pass.trimmedMsg  = trimmedMsg;
+        pass.source      = sourceLocal;
+        pass.channelId   = channel ? channel->GetChannelId() : 0;
+        pass.chainDepth  = chainDepth;
+        pass.scopeKey    = scopeKey;
+        pass.senderIsBot = senderIsBot;
+        pass.maxSpeakers = 1;
+
+        std::string candidateList;
+        for (Player* bot : finalCandidates)
+        {
+            if (!bot)
+                continue;
+
+            pass.candidateGuids.push_back(bot->GetGUID().GetRawValue());
+            pass.candidateNames.push_back(bot->GetName());
+
+            if (!candidateList.empty())
+                candidateList += ", ";
+            candidateList += bot->GetName();
+        }
+
+        if (pass.candidateGuids.size() >= 2)
+        {
+            pass.prompt = SafeFormat(g_AddresseePromptTemplate,
+                                     fmt::arg("speaker_name", player->GetName()),
+                                     fmt::arg("message", trimmedMsg),
+                                     fmt::arg("candidates", candidateList),
+                                     fmt::arg("max_names", pass.maxSpeakers));
+
+            // Handed off: the replies are submitted by the resolver when the
+            // answer lands on the world thread, so there is nothing more to do
+            // here. Falling through instead means the queue was full, and the
+            // candidates answer the old way.
+            if (OllamaDispatch_SubmitAddressee(std::move(pass)))
+                return;
+        }
+    }
     
     if(g_DebugEnabled && !finalCandidates.empty())
     {
@@ -1849,61 +1905,75 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                 ChatChannelSourceLocalStr[sourceLocal], botNames);
     }
     
-    const uint64_t senderGuid = player->GetGUID().GetRawValue();
-
     for (Player* bot : finalCandidates)
     {
         if (!bot)
             continue;
 
-        // Everything below runs on the world thread: prompt building reads
-        // live world state, and the governor decides before we spend an LLM
-        // call rather than after.
-        // A line aimed at this bot is owed an answer, so it skips the pacing
-        // cooldowns. The global messages-per-minute ceiling still applies.
-        const bool directAddress =
-            OllamaIsDirectAddress(bot, player, sourceLocal, trimmedMsg, senderIsBot, scopeKey);
+        OllamaSubmitBotReply(bot, player, msg, trimmedMsg, sourceLocal, channel,
+                             chainDepth, scopeKey, senderIsBot);
+    }
+}
 
-        if (!Governor_CanSend(bot->GetGUID(), scopeKey, directAddress))
-        {
-            if (g_DebugEnabled)
-                LOG_INFO("module.ollamachat",
-                         "[Ollama Chat] Bot {} skipped: cooldown or rate limit.", bot->GetName());
-            continue;
-        }
+bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
+                          const std::string& trimmedMsg, ChatChannelSourceLocal sourceLocal,
+                          Channel* channel, uint8_t chainDepth, const std::string& scopeKey,
+                          bool senderIsBot)
+{
+    if (!bot || !sender)
+        return false;
 
-        uint32_t maxWords = 0;
-        std::string prompt = GenerateBotPrompt(bot, msg, player, &maxWords);
-        if (prompt.empty())
-            continue;
+    // Everything below runs on the world thread: prompt building reads live
+    // world state, and the governor decides before we spend an LLM call rather
+    // than after.
+    // A line aimed at this bot is owed an answer, so it skips the pacing
+    // cooldowns. The global messages-per-minute ceiling still applies.
+    const bool directAddress =
+        OllamaIsDirectAddress(bot, sender, sourceLocal, trimmedMsg, senderIsBot, scopeKey);
 
-        OllamaChatRequest request;
-        request.botGuid     = bot->GetGUID().GetRawValue();
-        request.targetGuid  = senderGuid;
-        request.source      = sourceLocal;
-        request.channelName = channel ? channel->GetName() : std::string();
-        request.channelId   = channel ? channel->GetChannelId() : 0;
-        request.chainDepth  = chainDepth;
-        request.directAddress = directAddress;
-        request.scopeKey    = scopeKey;
-        request.prompt      = std::move(prompt);
-        request.botName     = bot->GetName();
-        request.maxWords    = maxWords;
-        request.originMessage = msg;
-        request.kind = (g_RoleplayEnable && g_RoleplayStrictness >= 1)
-                           ? OllamaRequestKind::RoleplayReply
-                           : OllamaRequestKind::ChatReply;
-        request.triggerBotReplies = (sourceLocal != SRC_WHISPER_LOCAL);
-        request.recordHistory     = !senderIsBot;
-        request.updateSentiment   = !senderIsBot && g_EnableSentimentTracking;
+    if (!Governor_CanSend(bot->GetGUID(), scopeKey, directAddress))
+    {
+        if (g_DebugEnabled)
+            LOG_INFO("module.ollamachat",
+                     "[Ollama Chat] Bot {} skipped: cooldown or rate limit.", bot->GetName());
+        return false;
+    }
 
-        if (!OllamaDispatch_Submit(std::move(request)) && g_DebugEnabled)
-        {
+    uint32_t maxWords = 0;
+    std::string prompt = GenerateBotPrompt(bot, msg, sender, &maxWords);
+    if (prompt.empty())
+        return false;
+
+    OllamaChatRequest request;
+    request.botGuid     = bot->GetGUID().GetRawValue();
+    request.targetGuid  = sender->GetGUID().GetRawValue();
+    request.source      = sourceLocal;
+    request.channelName = channel ? channel->GetName() : std::string();
+    request.channelId   = channel ? channel->GetChannelId() : 0;
+    request.chainDepth  = chainDepth;
+    request.directAddress = directAddress;
+    request.scopeKey    = scopeKey;
+    request.prompt      = std::move(prompt);
+    request.botName     = bot->GetName();
+    request.maxWords    = maxWords;
+    request.originMessage = msg;
+    request.kind = (g_RoleplayEnable && g_RoleplayStrictness >= 1)
+                       ? OllamaRequestKind::RoleplayReply
+                       : OllamaRequestKind::ChatReply;
+    request.triggerBotReplies = (sourceLocal != SRC_WHISPER_LOCAL);
+    request.recordHistory     = !senderIsBot;
+    request.updateSentiment   = !senderIsBot && g_EnableSentimentTracking;
+
+    if (!OllamaDispatch_Submit(std::move(request)))
+    {
+        if (g_DebugEnabled)
             LOG_INFO("module.ollamachat",
                      "[Ollama Chat] Bot {} reply dropped: dispatcher queue full.",
                      bot->GetName());
-        }
+        return false;
     }
+
+    return true;
 }
 
 static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatChannelSourceLocal source, Channel* channel, Player* receiver)

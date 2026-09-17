@@ -1316,6 +1316,12 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             ? player->GetGuildId() : 0,
         scopeGroupOrZone);
 
+    // Everything said here, with who said it, so a later pass can work out who
+    // a follow-up was aimed at. Recorded for bots as well as people -- a bot's
+    // reply re-enters through ProcessBotChatMessage -- and placed after the
+    // blacklist checks above, so command spam never becomes context.
+    Governor_NoteScopeLine(scopeKey, player->GetName(), trimmedMsg);
+
     if (!senderIsBot)
     {
         // A real player spoke here. This timestamp is what lets bots keep
@@ -1877,10 +1883,23 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
 
         if (pass.candidateGuids.size() >= 2)
         {
+            // What was said just before this line. Without it the pass sees one
+            // remark and a list of names, so a follow-up that names nobody is
+            // unresolvable in principle rather than merely hard: measured
+            // 2026-09-17, the player asked "Your satchel is in Gnomeregan?" one
+            // line after Fenklebleen had mentioned his satchel, and the pass
+            // handed it to Grommell, who answered as though the satchel were
+            // his. Skips one from the end -- the line being decided about has
+            // already been recorded by the time we reach here.
+            std::string context = Governor_RecentLines(scopeKey, g_AddresseeContextLines, 1);
+            if (context.empty())
+                context = "(nothing was said before this)\n";
+
             pass.prompt = SafeFormat(g_AddresseePromptTemplate,
                                      fmt::arg("speaker_name", player->GetName()),
                                      fmt::arg("message", trimmedMsg),
                                      fmt::arg("candidates", candidateList),
+                                     fmt::arg("context", context),
                                      fmt::arg("max_names", pass.maxSpeakers));
 
             // Handed off: the replies are submitted by the resolver when the

@@ -618,6 +618,24 @@ OllamaChat.Addressee.Enable = 0
 #   Default:     2
 OllamaChat.Addressee.MinCandidates = 2
 
+# OllamaChat.Addressee.ContextLines
+#   Description: How many preceding lines of the conversation the pass is shown,
+#                as "Name: line", oldest first.
+#
+#                Without them the pass sees one remark and a list of names, so a
+#                follow-up that names nobody is unresolvable in principle rather
+#                than merely hard -- and an empty verdict falls through to a
+#                random candidate. Measured 2026-09-17: the player asked "Your
+#                satchel is in Gnomeregan?" one line after one bot had mentioned
+#                his satchel, and the pass handed the question to a different
+#                bot, who answered as though the satchel were his. 11 of 21
+#                unnamed follow-ups went to the wrong bot that way.
+#
+#                Costs prompt tokens on the cheap lane only. 0 restores the
+#                older context-free behaviour.
+#   Default:     4
+OllamaChat.Addressee.ContextLines = 4
+
 # OllamaChat.Initiate.Enable
 #   Description: Let a bot START something (plan 25 item 40). Ambient chatter
 #                already picks topics ABOUT nearby people -- it resolved a live
@@ -698,6 +716,23 @@ OllamaChat.HeldTongue.Chance = 35
 #   Default:     the wording compiled in, which an absent or empty key restores.
 OllamaChat.HeldTongue.Emote = "holds their tongue and lets {speaker_name} speak"
 
+# OllamaChat.HeldTongue.EmoteWaitSeconds
+#   Description: How long the emote waits for the line it defers to, before it
+#                is given up on.
+#
+#                The cheap lane answers a held tongue in well under a second
+#                while the reply it names takes about three, so firing on
+#                arrival announced "holds their tongue and lets X speak" BEFORE
+#                X had said anything. All four emotes in the 2026-09-17
+#                playtest landed about three seconds early, which telegraphed
+#                the answer and inverted cause and effect.
+#
+#                If the reply never arrives -- suppressed by the governor, or
+#                with nowhere to send it -- the emote is DROPPED rather than
+#                sent late, because it asserts that X then spoke, and X did not.
+#   Default:     8
+OllamaChat.HeldTongue.EmoteWaitSeconds = 8
+
 # OllamaChat.HeldTongue.Prompt
 #   Description: The question put to the cheap lane. Placeholders: {bot_name}
 #                {from_name} {message} {speaker_name}.
@@ -714,10 +749,13 @@ OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said
 
 # OllamaChat.Addressee.PromptTemplate
 #   Description: The question put to the cheap lane. Placeholders: {speaker_name}
-#                {message} {candidates} ({max_names} is also available, though the
-#                default below does not use it). It must ask for JSON and nothing
-#                else -- the reply is read as {"to":[...]}, taking the outermost
-#                braces, so a model that wraps its answer in a sentence still parses.
+#                {message} {candidates} {context} ({max_names} is also available,
+#                though the default below does not use it). {context} is the
+#                preceding lines of the conversation, "Name: line" per line --
+#                see Addressee.ContextLines above. It must ask for JSON and
+#                nothing else -- the reply is read as {"to":[...]}, taking the
+#                outermost braces, so a model that wraps its answer in a
+#                sentence still parses.
 #
 #   BRACES: any brace that is part of the JSON rather than a placeholder MUST be
 #           doubled -- {{"to":[]}} not {"to":[]}. This string goes through fmt,
@@ -733,7 +771,7 @@ OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said
 #            answer the default, took it from 2 of 4 to 6 of 6 on lines taken from
 #            a real playtest.
 #   Default:  the wording compiled in, which an absent or empty key restores.
-OllamaChat.Addressee.PromptTemplate = "People are talking in Azeroth. {speaker_name} just said: \"{message}\"\nThese people are close enough to answer: {candidates}\nWas that aimed at one of them in particular? Most talk is not: a remark to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} unless the words name one of them, or plainly answer something only one of them could have said - then answer {{\"to\":[\"name\"]}} with that one name. Reply with JSON and nothing else."
+OllamaChat.Addressee.PromptTemplate = "People are talking in Azeroth.\nWhat was said just before, oldest first:\n{context}{speaker_name} just said: \"{message}\"\nThese people are close enough to answer: {candidates}\nWas that aimed at one of them in particular? Most talk is not: a remark to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} unless the words name one of them, or plainly answer something only one of them could have said - then answer {{\"to\":[\"name\"]}} with that one name. A follow-up that names nobody - \"yours?\", \"where did you find it?\", \"is it far?\" - is aimed at whoever raised that subject in the lines above. Reply with JSON and nothing else."
 
 # --------------------------------------------
 # ENVIRONMENTAL/CONTEXTUAL TEMPLATES
@@ -1444,6 +1482,33 @@ OllamaChat.Repetition.OpenerHistorySize = 8
 #        repeated opener than lose the odd answer.
 #        Default: 1
 OllamaChat.Repetition.OpenerCheckDirectAddress = 1
+
+#    OllamaChat.Repetition.SentenceCheckDirectAddress
+#        Whether a repeated SENTENCE is trimmed out of a directly-addressed
+#        reply, leaving the rest of the answer standing.
+#
+#        Between the two checks above there was a gap. Whole-line suppression
+#        never applies to direct address, and the opener check only ever sees
+#        the first three words -- so a closing catchphrase was checked by
+#        nothing at all. Measured in a party of three on 2026-09-17: one bot
+#        ended four separate replies with "Keep your axe dry, cousin." and said
+#        "We walk the bridge." three times; another repeated a two-sentence
+#        refusal verbatim thirteen minutes apart.
+#
+#        Only the repeating sentence is dropped, never the whole line, and only
+#        against what THIS bot said before -- two people can reach the same
+#        sentence honestly, but one person reaching it twice is the tic. If
+#        every sentence is a repeat the line goes out unchanged: the same
+#        question deserves the same answer.
+#        Default: 1
+OllamaChat.Repetition.SentenceCheckDirectAddress = 1
+
+#    OllamaChat.Repetition.SentenceMinWords
+#        Shortest sentence, in words, that can count as a repeat. Below this,
+#        lines like "Aye." or "I do not eat." repeat honestly, and suppressing
+#        them makes a bot sound evasive. 0 turns the check off entirely.
+#        Default: 4
+OllamaChat.Repetition.SentenceMinWords = 4
 
 ###############################################################################
 #

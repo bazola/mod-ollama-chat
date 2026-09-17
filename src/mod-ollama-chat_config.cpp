@@ -126,6 +126,8 @@ float    g_RepetitionSimilarityThreshold = 0.72f;
 uint32_t g_RepetitionWindowSeconds       = 1800;
 uint32_t g_OpenerHistorySize             = 8;
 bool     g_OpenerCheckDirectAddress      = true;
+bool     g_SentenceCheckDirectAddress    = true;
+uint32_t g_SentenceRepeatMinWords        = 4;
 
 // --------------------------------------------
 // Topic engine
@@ -179,12 +181,14 @@ std::vector<std::string> g_EmoteRegisters;
 std::vector<std::string> g_EventRegisters;
 bool        g_AddresseeEnable         = false;
 uint32_t    g_AddresseeMinCandidates  = 2;
+uint32_t    g_AddresseeContextLines   = 4;
 std::string g_AddresseePromptTemplate;
 bool        g_InitiateEnable          = false;
 uint32_t    g_InitiateChance          = 25;
 std::string g_InitiateDirective;
 bool        g_HeldTongueEnable        = false;
 uint32_t    g_HeldTongueChance        = 35;
+uint32_t    g_HeldTongueEmoteWaitSeconds = 8;
 std::string g_HeldTonguePrompt;
 std::string g_HeldTongueEmote;
 std::vector<std::string> g_RoleplayQuestionVariations;
@@ -762,6 +766,8 @@ void LoadOllamaChatConfig()
     g_RepetitionWindowSeconds         = sConfigMgr->GetOption<uint32_t>("OllamaChat.Repetition.WindowSeconds", 1800);
     g_OpenerHistorySize               = sConfigMgr->GetOption<uint32_t>("OllamaChat.Repetition.OpenerHistorySize", 8);
     g_OpenerCheckDirectAddress        = sConfigMgr->GetOption<bool>("OllamaChat.Repetition.OpenerCheckDirectAddress", true);
+    g_SentenceCheckDirectAddress      = sConfigMgr->GetOption<bool>("OllamaChat.Repetition.SentenceCheckDirectAddress", true);
+    g_SentenceRepeatMinWords          = sConfigMgr->GetOption<uint32_t>("OllamaChat.Repetition.SentenceMinWords", 4);
 
     // --- Topic engine ----------------------------------------------------
     g_TopicWeightPeople               = sConfigMgr->GetOption<uint32_t>("OllamaChat.Topic.WeightPeople", 30);
@@ -1039,6 +1045,7 @@ void LoadOllamaChatConfig()
     // large a change in how an evening feels to switch on unmeasured.
     g_AddresseeEnable        = sConfigMgr->GetOption<bool>("OllamaChat.Addressee.Enable", false);
     g_AddresseeMinCandidates = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.MinCandidates", 2);
+    g_AddresseeContextLines  = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.ContextLines", 4);
     // Braces that are part of the JSON, not a placeholder, must be doubled:
     // SafeFormat is fmt::vformat, so a bare { opens a format field and the whole
     // template comes back as the literal string "[Format Error]".
@@ -1049,13 +1056,17 @@ void LoadOllamaChatConfig()
     // no one, and making {"to":[]} the default, took it from 2 of 4 to 6 of 6.
     g_AddresseePromptTemplate = sConfigMgr->GetOption<std::string>(
         "OllamaChat.Addressee.PromptTemplate",
-        "People are talking in Azeroth. {speaker_name} just said: \"{message}\"\n"
+        "People are talking in Azeroth.\n"
+        "What was said just before, oldest first:\n{context}"
+        "{speaker_name} just said: \"{message}\"\n"
         "These people are close enough to answer: {candidates}\n"
         "Was that aimed at one of them in particular? Most talk is not: a remark "
         "to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} "
         "unless the words name one of them, or plainly answer something only one "
         "of them could have said - then answer {{\"to\":[\"name\"]}} with that one "
-        "name. Reply with JSON and nothing else.");
+        "name. A follow-up that names nobody - \"yours?\", \"where did you find "
+        "it?\", \"is it far?\" - is aimed at whoever raised that subject in the "
+        "lines above. Reply with JSON and nothing else.");
 
     // Bots starting something. When an ambient topic is about a specific person
     // who is close enough to hear, this turns the line toward them instead of
@@ -1074,6 +1085,7 @@ void LoadOllamaChatConfig()
     // field and the whole template comes back as "[Format Error]".
     g_HeldTongueEnable         = sConfigMgr->GetOption<bool>("OllamaChat.HeldTongue.Enable", false);
     g_HeldTongueChance         = sConfigMgr->GetOption<uint32_t>("OllamaChat.HeldTongue.Chance", 35);
+    g_HeldTongueEmoteWaitSeconds = sConfigMgr->GetOption<uint32_t>("OllamaChat.HeldTongue.EmoteWaitSeconds", 8);
     g_HeldTongueEmote          = sConfigMgr->GetOption<std::string>(
         "OllamaChat.HeldTongue.Emote", "holds their tongue and lets {speaker_name} speak");
 

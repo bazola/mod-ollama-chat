@@ -139,6 +139,11 @@ struct OllamaHeldTongueRequest
     std::string message;       // what they said
     std::string speakerName;   // who answered instead
 
+    // Where this happened. Carried so the emote can wait for the line it
+    // defers to: the resolver has to recognise that speaker's reply landing in
+    // this conversation, not somewhere else the same bot happens to be talking.
+    std::string scopeKey;
+
     std::string prompt;
 };
 
@@ -182,6 +187,16 @@ struct OllamaDispatchStats
     uint64_t totalDroppedEmpty;
     uint64_t totalDroppedGovernor;
     uint64_t totalFailed;
+
+    // Held-tongue emotes: held back waiting for the line they defer to, sent
+    // once it landed, and given up on because it never did.
+    uint64_t heldTongueDeferred;
+    uint64_t heldTongueFired;
+    uint64_t heldTongueAbandoned;
+
+    // Replies that went out with a repeated sentence trimmed off.
+    uint64_t tailsTrimmed;
+
     std::string lastError;
 };
 OllamaDispatchStats OllamaDispatch_GetStats();

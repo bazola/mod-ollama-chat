@@ -34,6 +34,7 @@
 #include <list>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 // Local patch (custom-wow): mod-ledger records channel replies, which bypass the
@@ -112,6 +113,87 @@ namespace
 
     std::mutex  g_errorMutex;
     std::string g_lastError;
+
+    // --- held-tongue emotes, deferred -------------------------------------
+    //
+    // The cheap lane answers a held tongue in well under a second, while the
+    // reply it defers to takes about three. Firing the emote on arrival
+    // therefore announced "holds their tongue and lets X speak" BEFORE X had
+    // said anything -- all four emotes in the 2026-09-17 playtest landed about
+    // three seconds early, which telegraphed the answer and inverted cause and
+    // effect.
+    //
+    // So the emote waits for the line it names. All of this is world-thread
+    // only -- ResolveHeldTongue, Deliver and OllamaDispatch_Update all run
+    // there -- which is why none of it is locked.
+
+    struct PendingEmote
+    {
+        uint64_t          botGuid = 0;
+        std::string       speakerName;   // the line being waited for
+        std::string       scopeKey;
+        std::string       line;
+        Clock::time_point giveUpAt;
+    };
+
+    std::vector<PendingEmote> g_pendingEmotes;
+
+    // scopeKey + '|' + name -> when that person last spoke there, so a held
+    // tongue that resolves AFTER the reply it names still fires rather than
+    // waiting for a line that has already been said.
+    std::unordered_map<std::string, Clock::time_point> g_recentSpeakers;
+
+    std::atomic<uint64_t> g_heldTongueDeferred{ 0 };
+    std::atomic<uint64_t> g_heldTongueFired{ 0 };
+    std::atomic<uint64_t> g_heldTongueAbandoned{ 0 };
+    std::atomic<uint64_t> g_tailsTrimmed{ 0 };
+
+    std::string SpeakerKey(const std::string& scopeKey, const std::string& name)
+    {
+        return scopeKey + "|" + name;
+    }
+
+    // Re-resolves the bot: the wait is seconds long, and in that window it can
+    // log out, die or leave exactly as a reply in flight can.
+    void EmitHeldTongue(uint64_t botGuid, const std::string& line)
+    {
+        Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(botGuid));
+        if (!bot || !bot->IsInWorld() || !bot->IsAlive())
+            return;
+
+        bot->TextEmote(line);
+        ++g_heldTongueFired;
+    }
+
+    bool SpokeRecently(const std::string& scopeKey, const std::string& name)
+    {
+        auto it = g_recentSpeakers.find(SpeakerKey(scopeKey, name));
+        if (it == g_recentSpeakers.end())
+            return false;
+
+        return std::chrono::duration_cast<std::chrono::seconds>(
+                   Clock::now() - it->second).count() <=
+               int64_t(g_HeldTongueEmoteWaitSeconds);
+    }
+
+    // A line just landed here. Release every emote that was waiting for it.
+    void NoteSpoken(const std::string& scopeKey, const std::string& speakerName)
+    {
+        g_recentSpeakers[SpeakerKey(scopeKey, speakerName)] = Clock::now();
+
+        for (auto it = g_pendingEmotes.begin(); it != g_pendingEmotes.end(); )
+        {
+            if (it->scopeKey == scopeKey && it->speakerName == speakerName)
+            {
+                EmitHeldTongue(it->botGuid, it->line);
+                it = g_pendingEmotes.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
 
     void RecordError(const std::string& what)
     {
@@ -475,17 +557,34 @@ namespace
         if (!mattered || g_HeldTongueEmote.empty())
             return;
 
-        Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(h.botGuid));
-        if (!bot || !bot->IsInWorld() || !bot->IsAlive())
-            return;
-
-        // World thread, so the emote can go out directly. A custom string
-        // rather than a TEXT_EMOTE_* id: there is no "holds tongue" emote in
-        // 3.3.5, and the stock table would force a compromise like "ponders".
+        // A custom string rather than a TEXT_EMOTE_* id: there is no "holds
+        // tongue" emote in 3.3.5, and the stock table would force a compromise
+        // like "ponders".
         const std::string line = SafeFormat(g_HeldTongueEmote,
                                             fmt::arg("speaker_name", h.speakerName));
-        if (!line.empty() && line != "[Format Error]")
-            bot->TextEmote(line);
+        if (line.empty() || line == "[Format Error]")
+            return;
+
+        // The emote follows the line it defers to instead of racing ahead of
+        // it. If that speaker has already been heard here -- this answer came
+        // back late, or their reply was unusually quick -- there is nothing
+        // left to wait for.
+        if (SpokeRecently(h.scopeKey, h.speakerName))
+        {
+            EmitHeldTongue(h.botGuid, line);
+        }
+        else
+        {
+            PendingEmote p;
+            p.botGuid     = h.botGuid;
+            p.speakerName = h.speakerName;
+            p.scopeKey    = h.scopeKey;
+            p.line        = line;
+            p.giveUpAt    = Clock::now() + std::chrono::seconds(g_HeldTongueEmoteWaitSeconds);
+
+            g_pendingEmotes.push_back(std::move(p));
+            ++g_heldTongueDeferred;
+        }
 
         if (g_DebugEnabled)
             LOG_INFO("module.ollamachat",
@@ -671,6 +770,7 @@ namespace
             h.fromName    = sender->GetName();
             h.message     = a.trimmedMsg;
             h.speakerName = firstSpeakerName;
+            h.scopeKey    = a.scopeKey;
             h.prompt      = SafeFormat(g_HeldTonguePrompt,
                                        fmt::arg("bot_name", h.botName),
                                        fmt::arg("from_name", h.fromName),
@@ -684,7 +784,9 @@ namespace
         }
     }
 
-    void Deliver(const Completion& c, const OllamaWorldSnapshot& world)
+    // By value: a repeated tail is trimmed off the line below, and the trimmed
+    // text is what gets sent, recorded and echoed to the other bots.
+    void Deliver(Completion c, const OllamaWorldSnapshot& world)
     {
         Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(c.request.botGuid));
         if (!bot || !bot->IsInWorld())
@@ -748,6 +850,31 @@ namespace
             return;
         }
 
+        // A catchphrase riding along behind something new. Whole-line
+        // suppression is skipped for direct address on purpose, and the opener
+        // check only ever sees the first three words, so a repeated CLOSING
+        // sentence passed both: measured 2026-09-17, one bot ended four
+        // separate replies with "Keep your axe dry, cousin." and said "We walk
+        // the bridge." three times.
+        //
+        // Trimmed rather than suppressed. The answer is still owed; only the
+        // tic is not, and dropping the whole line would leave the asker staring
+        // at silence -- the very thing direct address is exempted to prevent.
+        if (directAddress && g_SentenceCheckDirectAddress)
+        {
+            std::string trimmed = Governor_StripRepeatedSentences(botGuid, c.text);
+            if (trimmed != c.text)
+            {
+                c.text = std::move(trimmed);
+                ++g_tailsTrimmed;
+
+                if (g_DebugEnabled)
+                    LOG_INFO("module.ollamachat",
+                             "[Ollama Chat] Bot {} had a repeated sentence trimmed: '{}'",
+                             bot->GetName(), c.text);
+            }
+        }
+
         if (!Governor_TryConsumeSend(botGuid, c.request.scopeKey, directAddress))
         {
             ++g_droppedGovernor;
@@ -770,6 +897,10 @@ namespace
 
         Governor_RecordUtterance(botGuid, c.request.scopeKey, c.text);
         ++g_totalDelivered;
+
+        // The line has landed, so anyone who held their tongue waiting for this
+        // speaker can now be seen to have done so.
+        NoteSpoken(c.request.scopeKey, bot->GetName());
 
         // This bot is now in a conversation with whoever it just answered, so
         // their next line in this scope is a turn in it rather than ambient
@@ -1039,6 +1170,38 @@ void OllamaDispatch_Update(uint32_t /*diff*/)
         }
     }
 
+    // Deferred emotes whose line never came. Dropped rather than fired late:
+    // "holds their tongue and lets X speak" asserts that X then spoke, and when
+    // the reply was suppressed by the governor or had nowhere to go, X did not.
+    // Saying it anyway describes a silence that was never broken.
+    for (auto it = g_pendingEmotes.begin(); it != g_pendingEmotes.end(); )
+    {
+        if (it->giveUpAt <= now)
+        {
+            ++g_heldTongueAbandoned;
+            it = g_pendingEmotes.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    // The speaker map is only ever consulted inside the wait window, so
+    // anything older is dead weight. Pruned on size, so the common case of a
+    // handful of entries costs nothing per tick.
+    if (g_recentSpeakers.size() > 64)
+    {
+        for (auto it = g_recentSpeakers.begin(); it != g_recentSpeakers.end(); )
+        {
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count() >
+                int64_t(g_HeldTongueEmoteWaitSeconds))
+                it = g_recentSpeakers.erase(it);
+            else
+                ++it;
+        }
+    }
+
     if (due.empty())
         return;
 
@@ -1169,6 +1332,10 @@ OllamaDispatchStats OllamaDispatch_GetStats()
     stats.totalDroppedEmpty     = g_droppedEmpty.load();
     stats.totalDroppedGovernor  = g_droppedGovernor.load();
     stats.totalFailed           = g_totalFailed.load();
+    stats.heldTongueDeferred    = g_heldTongueDeferred.load();
+    stats.heldTongueFired       = g_heldTongueFired.load();
+    stats.heldTongueAbandoned   = g_heldTongueAbandoned.load();
+    stats.tailsTrimmed          = g_tailsTrimmed.load();
 
     return stats;
 }

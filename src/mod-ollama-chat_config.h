@@ -210,6 +210,14 @@ extern uint32_t g_OpenerHistorySize;
 // suppression never does -- the same question deserves the same answer -- but
 // an opener is not an answer. Costs the occasional reply; see the conf.
 extern bool     g_OpenerCheckDirectAddress;
+// Whether a repeated SENTENCE is stripped out of a directly-addressed reply.
+// Between whole-line suppression (never applied to direct address) and the
+// opener check (which only sees the first three words) a bot's favourite
+// closing sentence was checked by nothing at all.
+extern bool     g_SentenceCheckDirectAddress;
+// Shortest sentence, in words, that counts as a repeat. Below this, lines like
+// "Aye." repeat honestly.
+extern uint32_t g_SentenceRepeatMinWords;
 
 // --------------------------------------------
 // Topic engine
@@ -272,6 +280,10 @@ extern std::vector<std::string> g_EventRegisters;
 extern bool        g_AddresseeEnable;
 extern uint32_t    g_AddresseeMinCandidates;
 extern std::string g_AddresseePromptTemplate;
+// How many preceding lines of the conversation the pass is shown. A follow-up
+// that names nobody -- "yours?", "where did you find it?" -- is unresolvable
+// without them, and an empty verdict falls through to a random candidate.
+extern uint32_t    g_AddresseeContextLines;
 
 // Bots starting something (plan 25 item 40). An ambient line about a person can
 // be aimed AT that person instead of at the room: naming them short-circuits the
@@ -290,6 +302,10 @@ extern bool        g_HeldTongueEnable;
 extern uint32_t    g_HeldTongueChance;
 extern std::string g_HeldTonguePrompt;
 extern std::string g_HeldTongueEmote;
+// How long the emote waits for the line it defers to. The cheap lane answers
+// in well under a second while the reply it names takes about three, so firing
+// on arrival announced "lets X speak" before X had spoken.
+extern uint32_t    g_HeldTongueEmoteWaitSeconds;
 extern std::vector<std::string> g_RoleplayQuestionVariations;
 
 // --------------------------------------------

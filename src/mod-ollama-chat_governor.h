@@ -87,6 +87,39 @@ bool Governor_HasOpenerCollision(const std::string& scopeKey, const std::string&
 void Governor_RecordUtterance(ObjectGuid botGuid, const std::string& scopeKey,
                               const std::string& text);
 
+// Drop sentences this bot has said recently from a line it is about to say,
+// keeping the rest of the answer.
+//
+// Whole-line suppression is skipped for direct address on purpose, and in a
+// small party every line is direct address -- so a bot's favourite closing
+// sentence is checked by nothing at all. The opener check does not reach it
+// either: a tail is not an opener. Measured in the 2026-09-17 playtest: one bot
+// ended four separate replies with "Keep your axe dry, cousin." and said "We
+// walk the bridge." three times; another repeated a two-sentence refusal
+// verbatim thirteen minutes apart.
+//
+// Only this bot's own history is consulted. Two people can reach the same
+// sentence honestly; one person reaching it twice is the tic.
+//
+// Returns the line with repeated sentences removed. If every sentence is a
+// repeat the ORIGINAL comes back untouched -- the same question deserves the
+// same answer, and an empty line reads as the bot being broken.
+std::string Governor_StripRepeatedSentences(ObjectGuid botGuid, const std::string& text);
+
+// --- what was just said here ---------------------------------------------
+
+// A line and who said it, kept per scope. The repetition history above cannot
+// serve this: it stores normalized text and records no speaker at all.
+void Governor_NoteScopeLine(const std::string& scopeKey, const std::string& speakerName,
+                            const std::string& text);
+
+// The recent lines of this scope as "Name: line", oldest first, for a prompt
+// that has to work out who a follow-up was aimed at. `skipMostRecent` drops
+// that many from the end -- one, normally, because the line being decided about
+// has already been recorded by the time the decision is made.
+std::string Governor_RecentLines(const std::string& scopeKey, uint32_t maxLines,
+                                 uint32_t skipMostRecent);
+
 // Similarity in [0,1]; exposed for the .ollama status command and testing.
 float Governor_Similarity(const std::string& a, const std::string& b);
 

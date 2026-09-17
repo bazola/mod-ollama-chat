@@ -485,6 +485,11 @@ bool OllamaChatConfigCommand::HandleOllamaStatusCommand(ChatHandler* handler)
                              (unsigned long long)dispatch.totalDroppedQueueFull,
                              (unsigned long long)dispatch.totalDroppedEmpty,
                              (unsigned long long)dispatch.totalDroppedGovernor);
+    handler->PSendSysMessage("Held tongue: {} emotes deferred, {} sent, {} abandoned   Repeated tails trimmed: {}",
+                             (unsigned long long)dispatch.heldTongueDeferred,
+                             (unsigned long long)dispatch.heldTongueFired,
+                             (unsigned long long)dispatch.heldTongueAbandoned,
+                             (unsigned long long)dispatch.tailsTrimmed);
 
     handler->PSendSysMessage("Governor: {} bots, {} scopes tracked, {} sends in the last minute",
                              gov.trackedBots, gov.trackedScopes, gov.sendsLastMinute);

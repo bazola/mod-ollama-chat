@@ -31,7 +31,24 @@ namespace
         GramCounts            grams;     // character trigrams
         double                gramNorm = 0.0;   // sqrt(sum of squares)
         TimePoint             when;
+
+        // Each sentence of the line, normalized. Whole-line scoring cannot see
+        // a catchphrase riding along at the end of an otherwise new answer.
+        std::vector<std::string> sentences;
     };
+
+    // A line as it was said, with who said it. Kept apart from Utterance
+    // because that one is built for comparison -- normalized, speakerless --
+    // and this one is built to be read back in a prompt.
+    struct SpokenLine
+    {
+        std::string speaker;
+        std::string text;
+        TimePoint   when;
+    };
+
+    // Enough to answer "who raised this subject" without keeping a transcript.
+    constexpr size_t kMaxScopeLines = 16;
 
     struct BotState
     {
@@ -53,6 +70,9 @@ namespace
         TimePoint             lastSend{};
         std::deque<Utterance> history;
         std::deque<TimePoint> sendTimes;
+
+        // What was actually said here, and by whom.
+        std::deque<SpokenLine> lines;
     };
 
     std::unordered_map<uint64_t, BotState>    g_bots;
@@ -212,6 +232,62 @@ namespace
     {
         while (hist.size() > maxSize)
             hist.pop_front();
+    }
+
+    // The sentence spans of a line, raw text preserved, so a sentence that is
+    // kept goes back exactly as the model wrote it. Terminators run together
+    // ("...!?") and a closing quote or bracket belongs to the sentence it ends.
+    std::vector<std::string> RawSentences(const std::string& text)
+    {
+        std::vector<std::string> out;
+        size_t start = 0;
+
+        for (size_t i = 0; i < text.size(); ++i)
+        {
+            const char ch = text[i];
+            if (ch != '.' && ch != '!' && ch != '?')
+                continue;
+
+            size_t end = i + 1;
+            while (end < text.size() &&
+                   (text[end] == '.' || text[end] == '!' || text[end] == '?' ||
+                    text[end] == '"' || text[end] == '\'' || text[end] == ')'))
+                ++end;
+
+            out.push_back(text.substr(start, end - start));
+
+            while (end < text.size() && std::isspace(static_cast<unsigned char>(text[end])))
+                ++end;
+
+            start = end;
+            i     = end > 0 ? end - 1 : end;
+        }
+
+        // A trailing fragment with no terminator is still a sentence: the model
+        // is told to keep replies short and often ends without one.
+        if (start < text.size() && !NormalizeText(text.substr(start)).empty())
+            out.push_back(text.substr(start));
+
+        return out;
+    }
+
+    // Normalized sentences long enough to be a tic rather than an "Aye." Short
+    // interjections repeat honestly, and suppressing them makes a bot evasive.
+    std::vector<std::string> SentenceKeys(const std::string& text)
+    {
+        std::vector<std::string> keys;
+
+        for (const std::string& raw : RawSentences(text))
+        {
+            const std::string norm = NormalizeText(raw);
+            if (norm.empty())
+                continue;
+            if (Tokenize(norm, false).size() < size_t(g_SentenceRepeatMinWords))
+                continue;
+            keys.push_back(norm);
+        }
+
+        return keys;
     }
 }
 
@@ -563,6 +639,7 @@ void Governor_RecordUtterance(ObjectGuid botGuid, const std::string& scopeKey,
     u.grams      = BuildGrams(norm);
     u.gramNorm   = GramNorm(u.grams);
     u.when       = Clock::now();
+    u.sentences  = SentenceKeys(text);
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
@@ -573,6 +650,130 @@ void Governor_RecordUtterance(ObjectGuid botGuid, const std::string& scopeKey,
     ScopeState& scope = g_scopes[scopeKey];
     scope.history.push_back(std::move(u));
     TrimHistory(scope.history, g_ScopeHistorySize);
+}
+
+std::string Governor_StripRepeatedSentences(ObjectGuid botGuid, const std::string& text)
+{
+    if (g_SentenceRepeatMinWords == 0 || text.empty())
+        return text;
+
+    const std::vector<std::string> raws = RawSentences(text);
+
+    // One sentence is the whole answer, and the whole answer is spared on
+    // purpose for direct address. Only a tail riding along behind something new
+    // is in scope here.
+    if (raws.size() < 2)
+        return text;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const TimePoint now = Clock::now();
+
+    auto botIt = g_bots.find(botGuid.GetRawValue());
+    if (botIt == g_bots.end())
+        return text;
+
+    std::string kept;
+    bool        dropped = false;
+
+    for (const std::string& raw : raws)
+    {
+        const std::string norm = NormalizeText(raw);
+        bool              repeat = false;
+
+        if (!norm.empty() &&
+            Tokenize(norm, false).size() >= size_t(g_SentenceRepeatMinWords))
+        {
+            for (const Utterance& u : botIt->second.history)
+            {
+                if (SecondsSince(u.when, now) > double(g_RepetitionWindowSeconds))
+                    continue;
+                if (std::find(u.sentences.begin(), u.sentences.end(), norm) != u.sentences.end())
+                {
+                    repeat = true;
+                    break;
+                }
+            }
+        }
+
+        if (repeat)
+        {
+            dropped = true;
+            ++g_stats.blockedRepetition;
+            continue;
+        }
+
+        if (!kept.empty())
+            kept.push_back(' ');
+        kept += raw;
+    }
+
+    if (!dropped)
+        return text;
+
+    // Everything was a repeat: the bot is being asked the same thing again, and
+    // the same answer is the right one. Silence would read as a fault.
+    if (NormalizeText(kept).empty())
+        return text;
+
+    return kept;
+}
+
+// --- what was just said here ---------------------------------------------
+
+void Governor_NoteScopeLine(const std::string& scopeKey, const std::string& speakerName,
+                            const std::string& text)
+{
+    if (scopeKey.empty() || speakerName.empty() || text.empty())
+        return;
+
+    SpokenLine l;
+    l.speaker = speakerName;
+    l.text    = text;
+    l.when    = Clock::now();
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    ScopeState& scope = g_scopes[scopeKey];
+    scope.lines.push_back(std::move(l));
+
+    while (scope.lines.size() > kMaxScopeLines)
+        scope.lines.pop_front();
+}
+
+std::string Governor_RecentLines(const std::string& scopeKey, uint32_t maxLines,
+                                 uint32_t skipMostRecent)
+{
+    if (maxLines == 0)
+        return "";
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const TimePoint now = Clock::now();
+
+    auto scopeIt = g_scopes.find(scopeKey);
+    if (scopeIt == g_scopes.end())
+        return "";
+
+    const std::deque<SpokenLine>& lines = scopeIt->second.lines;
+    if (lines.size() <= size_t(skipMostRecent))
+        return "";
+
+    const size_t last  = lines.size() - size_t(skipMostRecent);   // one past the end
+    const size_t first = last > size_t(maxLines) ? last - size_t(maxLines) : 0;
+
+    std::string out;
+    for (size_t i = first; i < last; ++i)
+    {
+        // An hour-old line is not what a follow-up is following.
+        if (SecondsSince(lines[i].when, now) > double(g_RepetitionWindowSeconds))
+            continue;
+
+        out += lines[i].speaker;
+        out += ": ";
+        out += lines[i].text;
+        out.push_back('\n');
+    }
+
+    return out;
 }
 
 // --- per-feature debounces -----------------------------------------------

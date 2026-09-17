@@ -113,6 +113,8 @@ namespace
 
         uint32_t emoteId = 0;
         std::string text = ProcessLlmResponse(api.text, task.request.botName, &emoteId);
+        if (task.request.maxWords > 0)
+            text = ClampReplyWords(text, task.request.maxWords);
 
         // Roleplay mode rejects lines carrying out-of-world vocabulary rather
         // than mangling the sentence around the offending word.

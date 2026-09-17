@@ -70,6 +70,8 @@ struct OllamaChatRequest
     // Resolved on the world thread before submission so the worker never has
     // to touch a Player to know these.
     std::string botName;
+    // Most words the spoken line may keep, from the "@N" on the length instruction drawn for it; 0 = no cap.
+    uint32_t    maxWords = 0;
     std::string originMessage;    // the message being replied to, if any
 
     // Post-delivery behaviour.

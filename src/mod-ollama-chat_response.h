@@ -43,6 +43,19 @@ std::string StripDecorativeUnicode(const std::string& text);
 // never splits a UTF-8 sequence.
 std::string ClampReplyLength(const std::string& text, uint32_t maxLen);
 
+// A prompt list entry may end in "@N": the most words a line drawn with it may keep. Strips the suffix
+// from text and returns N, or 0 when the entry carries none. The models read "a few words" as twenty or
+// forty, so the instruction alone does not hold a length; this is the part that does.
+uint32_t TakeWordCap(std::string& text);
+
+// Keep whole sentences while they fit in maxWords. A first sentence that is itself too long is cut at the
+// last clause break (comma, semicolon) inside the cap, and kept whole only when there is none.
+std::string ClampReplyWords(const std::string& text, uint32_t maxWords);
+
+// Drop a trailing sentence the model never finished (the token budget ran out mid-thought), when at least
+// one complete sentence comes before it. A line with no complete sentence is left alone.
+std::string DropUnfinishedTail(const std::string& text);
+
 // Run the full pipeline. Returns an empty string only when nothing usable
 // survived, in which case the caller should skip the reply.
 //

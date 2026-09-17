@@ -1872,7 +1872,8 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             continue;
         }
 
-        std::string prompt = GenerateBotPrompt(bot, msg, player);
+        uint32_t maxWords = 0;
+        std::string prompt = GenerateBotPrompt(bot, msg, player, &maxWords);
         if (prompt.empty())
             continue;
 
@@ -1887,6 +1888,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         request.scopeKey    = scopeKey;
         request.prompt      = std::move(prompt);
         request.botName     = bot->GetName();
+        request.maxWords    = maxWords;
         request.originMessage = msg;
         request.kind = (g_RoleplayEnable && g_RoleplayStrictness >= 1)
                            ? OllamaRequestKind::RoleplayReply
@@ -2031,7 +2033,7 @@ static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatCh
     }
 }
 
-std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* player)
+std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* player, uint32_t* outMaxWords)
 {  
     if (!bot || !player) {
         return "";
@@ -2182,8 +2184,16 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     // instruction the model reads. The template no longer fixes one length: every reply used to
     // come out in the same clipped register, whatever was asked. Ambient chatter gets the same
     // treatment through its variation list; this is the reply path's equivalent.
+    // The instruction alone never held: asked for "a few words", the model gave twenty to seventy. An entry's
+    // "@N" is enforced on the reply once it comes back (ClampReplyWords), by whole sentences.
     if (!g_ReplyRegisters.empty())
-        prompt += " " + g_ReplyRegisters[urand(0, static_cast<uint32_t>(g_ReplyRegisters.size() - 1))];
+    {
+        std::string reg = g_ReplyRegisters[urand(0, static_cast<uint32_t>(g_ReplyRegisters.size() - 1))];
+        const uint32_t cap = TakeWordCap(reg);
+        if (outMaxWords)
+            *outMaxWords = cap;
+        prompt += " " + reg;
+    }
 
     // Debug logging for full prompt including RAG information
     if (g_DebugEnabled && g_DebugShowFullPrompt) {

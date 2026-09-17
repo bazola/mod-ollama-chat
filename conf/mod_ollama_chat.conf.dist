@@ -547,12 +547,16 @@ OllamaChat.ChatExtraInfoTemplate = "Your Info: {bot_race} {bot_gender}, Spec: {b
 #                reply and appended to the prompt last, so a bot answering a player can be curt
 #                or expansive as the moment asks, instead of every reply arriving at one fixed
 #                length. Weight the list by repeating an entry: short answers should stay the
-#                norm, which is why the default below repeats the two shortest.
+#                norm, which is why the default below repeats the shortest.
+#   Word cap: an entry may end in "@N", the most words the reply may keep. The instruction alone never
+#         held a length (asked for "a few words", the model gave twenty to seventy), so the reply is cut
+#         back to whole sentences that fit N once it arrives. The suffix is stripped before the model
+#         sees the entry. The same suffix works on the RandomChatter and Roleplay variation lists.
 #   Note: ChatPromptTemplate must not also fix a length, or the two instructions fight and the
 #         template wins. Leave the template's length open ("at the length asked for at the end").
-#   Default: the eleven entries below, which are also compiled in as the fallback when this key
+#   Default: the ten entries below, which are also compiled in as the fallback when this key
 #            is absent or empty, so removing it changes nothing.
-OllamaChat.ReplyRegisters = Answer in a few words.|Answer in a few words.|Answer in a few words.|Answer in under twenty-five words.|Answer in under twenty-five words.|Answer in under twenty-five words.|Answer in up to forty-five words if what they said deserves it.|Answer in up to forty-five words if what they said deserves it.|If they asked how something in this world works, explain it properly, up to seventy words; otherwise keep it short.|If what they said touches on what people owe one another, say what you believe and why, up to seventy words; otherwise keep it short.|Answer at length, up to ninety words: say what you actually think, and why.
+OllamaChat.ReplyRegisters = Answer in a few words.@12|Answer in a few words.@12|Answer in a few words.@12|Answer in a few words.@12|Answer in a sentence or two, under twenty-five words.@30|Answer in a sentence or two, under twenty-five words.@30|Answer in a sentence or two, under twenty-five words.@30|Answer in up to forty words if what they said deserves it; otherwise keep it short.@45|Answer in up to forty words if what they said deserves it; otherwise keep it short.@45|If they asked how something in this world works, explain it properly, up to sixty words; otherwise keep it short.@65
 
 # --------------------------------------------
 # ENVIRONMENTAL/CONTEXTUAL TEMPLATES

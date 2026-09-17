@@ -980,18 +980,18 @@ void LoadOllamaChatConfig()
 
     // How long a reply may run, drawn per utterance and appended after everything else.
     // Repeated entries are how a list weights itself: short answers should stay the norm.
+    // "@N" is the word cap actually enforced on the reply (TakeWordCap / ClampReplyWords).
     g_ReplyRegisters = LoadEnvCommentVector("OllamaChat.ReplyRegisters", {
-        "Answer in a few words.",
-        "Answer in a few words.",
-        "Answer in a few words.",
-        "Answer in under twenty-five words.",
-        "Answer in under twenty-five words.",
-        "Answer in under twenty-five words.",
-        "Answer in up to forty-five words if what they said deserves it.",
-        "Answer in up to forty-five words if what they said deserves it.",
-        "If they asked how something in this world works, explain it properly, up to seventy words; otherwise keep it short.",
-        "If what they said touches on what people owe one another, say what you believe and why, up to seventy words; otherwise keep it short.",
-        "Answer at length, up to ninety words: say what you actually think, and why.",
+        "Answer in a few words.@12",
+        "Answer in a few words.@12",
+        "Answer in a few words.@12",
+        "Answer in a few words.@12",
+        "Answer in a sentence or two, under twenty-five words.@30",
+        "Answer in a sentence or two, under twenty-five words.@30",
+        "Answer in a sentence or two, under twenty-five words.@30",
+        "Answer in up to forty words if what they said deserves it; otherwise keep it short.@45",
+        "Answer in up to forty words if what they said deserves it; otherwise keep it short.@45",
+        "If they asked how something in this world works, explain it properly, up to sixty words; otherwise keep it short.@65",
     });
 
     // --- Roleplay-mode variation lists -----------------------------------

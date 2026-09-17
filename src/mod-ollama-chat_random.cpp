@@ -1,5 +1,6 @@
 #include "mod-ollama-chat_random.h"
 #include "mod-ollama-chat_config.h"
+#include "mod-ollama-chat_response.h"
 #include "mod-ollama-chat_dispatch.h"
 #include "mod-ollama-chat_governor.h"
 #include "mod-ollama-chat_handler.h"
@@ -129,7 +130,8 @@ namespace
         return true;
     }
 
-    std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo, bool guildTopic, bool trade)
+    std::string BuildRandomChatterPrompt(Player* bot, const std::string& environmentInfo, bool guildTopic, bool trade,
+                                         uint32_t& outMaxWords)
     {
         PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (!botAI || !botAI->GetChatHelper())
@@ -187,6 +189,8 @@ namespace
             variation = questions[PickIndex(questions.size())];
         }
 
+        // An entry's "@N" is the line's word cap, enforced when the reply comes back.
+        outMaxWords = TakeWordCap(variation);
         if (!variation.empty())
             prompt += " " + variation;
 
@@ -385,7 +389,8 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         }
 
         const bool trade = source == SRC_GENERAL_LOCAL && channelId == ChatChannelId::TRADE;
-        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic, trade);
+        uint32_t maxWords = 0;
+        std::string prompt = BuildRandomChatterPrompt(bot, topic.text, topic.isGuildTopic, trade, maxWords);
         if (prompt.empty())
         {
             reschedule();
@@ -402,6 +407,7 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         request.scopeKey    = scopeKey;
         request.prompt      = std::move(prompt);
         request.botName     = bot->GetName();
+        request.maxWords    = maxWords;
         request.kind        = OllamaRequestKind::RandomChatter;
         request.triggerBotReplies = true;
 

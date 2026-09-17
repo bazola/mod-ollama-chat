@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
+#include <string>
 #include <vector>
 
 namespace
@@ -368,6 +370,129 @@ std::string ClampReplyLength(const std::string& text, uint32_t maxLen)
     return Trim(head);
 }
 
+namespace
+{
+    bool IsSentenceEnd(const std::string& s, size_t i)
+    {
+        // i indexes a '.', '!' or '?'; a sentence ends there if the next character is space, a closing
+        // quote or the end of the text. Keeps "St. Alia" style abbreviations from counting mid-word.
+        const char c = s[i];
+        if (c != '.' && c != '!' && c != '?')
+            return false;
+        if (i + 1 >= s.size())
+            return true;
+        const char n = s[i + 1];
+        return n == ' ' || n == '"' || n == '\'' || n == ')';
+    }
+
+    size_t CountWords(const std::string& s, size_t from, size_t to)
+    {
+        size_t words = 0;
+        bool inWord = false;
+        for (size_t i = from; i < to && i < s.size(); ++i)
+        {
+            const bool space = std::isspace(static_cast<unsigned char>(s[i])) != 0;
+            if (!space && !inWord)
+                ++words;
+            inWord = !space;
+        }
+        return words;
+    }
+}
+
+uint32_t TakeWordCap(std::string& text)
+{
+    const size_t at = text.find_last_of('@');
+    if (at == std::string::npos || at + 1 >= text.size())
+        return 0;
+    for (size_t i = at + 1; i < text.size(); ++i)
+        if (!std::isdigit(static_cast<unsigned char>(text[i])))
+            return 0;
+    uint32_t cap = 0;
+    try { cap = static_cast<uint32_t>(std::stoul(text.substr(at + 1))); }
+    catch (const std::exception&) { return 0; }
+    text = Trim(text.substr(0, at));
+    return cap;
+}
+
+std::string ClampReplyWords(const std::string& text, uint32_t maxWords)
+{
+    if (maxWords == 0 || CountWords(text, 0, text.size()) <= maxWords)
+        return text;
+
+    // Whole sentences while they fit.
+    size_t keep = 0;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        if (!IsSentenceEnd(text, i))
+            continue;
+        size_t end = i + 1;
+        while (end < text.size() && (text[end] == '"' || text[end] == '\'' || text[end] == ')'))
+            ++end;
+        if (CountWords(text, 0, end) > maxWords)
+            break;
+        keep = end;
+    }
+    if (keep > 0)
+        return Trim(text.substr(0, keep));
+
+    // The first sentence alone overruns: end it at the last clause break inside the cap.
+    size_t words = 0, capEnd = text.size();
+    bool inWord = false;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        const bool space = std::isspace(static_cast<unsigned char>(text[i])) != 0;
+        if (!space && !inWord && ++words > maxWords)
+        {
+            capEnd = i;
+            break;
+        }
+        inWord = !space;
+    }
+    // Commas and semicolons only: after unicode folding a dash may sit inside a word ("stone-mace") as
+    // easily as between clauses, and cutting there leaves half a word.
+    const size_t brk = text.substr(0, capEnd).find_last_of(",;");
+    if (brk == std::string::npos || CountWords(text, 0, brk) < 3)
+    {
+        // No clause to stop at: the whole first sentence is better than a broken one.
+        for (size_t i = 0; i < text.size(); ++i)
+            if (IsSentenceEnd(text, i))
+                return Trim(text.substr(0, i + 1));
+        return text;
+    }
+    std::string head = Trim(text.substr(0, brk));
+    while (!head.empty() && (head.back() == '-' || head.back() == ' '))
+        head.pop_back();
+    return head.empty() ? text : head + ".";
+}
+
+std::string DropUnfinishedTail(const std::string& text)
+{
+    std::string s = Trim(text);
+    if (s.empty())
+        return s;
+    char last = s.back();
+    size_t tail = s.size();
+    while (tail > 0 && (s[tail - 1] == '"' || s[tail - 1] == '\'' || s[tail - 1] == ')'))
+        --tail;
+    if (tail > 0)
+        last = s[tail - 1];
+    if (last == '.' || last == '!' || last == '?')
+        return s;
+
+    for (size_t i = s.size(); i-- > 0; )
+    {
+        if (IsSentenceEnd(s, i))
+        {
+            size_t end = i + 1;
+            while (end < s.size() && (s[end] == '"' || s[end] == '\'' || s[end] == ')'))
+                ++end;
+            return Trim(s.substr(0, end));
+        }
+    }
+    return s;
+}
+
 // --------------------------------------------------------------------------
 
 std::string ProcessLlmResponse(const std::string& raw,
@@ -411,6 +536,7 @@ std::string ProcessLlmResponse(const std::string& raw,
     // that were not on the outside before.
     s = UnwrapQuotedReply(s);
     s = CollapseWhitespace(s);
+    s = DropUnfinishedTail(s);
     s = ClampReplyLength(s, g_MaxReplyLength);
 
     return Trim(s);

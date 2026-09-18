@@ -75,6 +75,12 @@ struct OllamaChatRequest
     uint32_t    maxWords = 0;
     std::string originMessage;    // the message being replied to, if any
 
+    // Held back this much longer before the line is delivered, on top of the
+    // typing simulation. The group branch staggers its speakers with it: two
+    // replies landing in the same tick read as a pile-on even when the pass
+    // chose both of them on purpose.
+    uint32_t    extraDelayMs = 0;
+
     // Post-delivery behaviour.
     bool triggerBotReplies = true;   // let other bots hear this line
     bool recordHistory     = false;  // append to conversation history
@@ -112,6 +118,13 @@ struct OllamaAddresseeRequest
     std::vector<uint64_t>    candidateGuids;
     std::vector<std::string> candidateNames;   // parallel to candidateGuids
     uint32_t                 maxSpeakers = 1;
+
+    // Who this person was already mid-exchange with when the line was routed,
+    // snapshotted on the world thread at submit time rather than read back
+    // afterwards: the resolver runs a round trip later, and the question is who
+    // held the thread when they spoke. 0 when nobody did.
+    uint64_t    holderGuid = 0;
+    std::string holderName;
 
     std::string prompt;
 };

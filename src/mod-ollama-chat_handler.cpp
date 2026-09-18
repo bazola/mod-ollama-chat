@@ -1759,9 +1759,18 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             if (!(g_DisableRepliesInCombat && chosen->IsInCombat()))
             {
                 finalCandidates.push_back(chosen);
+
+                // Naming a bot opens a thread with it, so the follow-up that
+                // names nobody -- "yours?", "is it far?" -- stays with it
+                // instead of going to a random voice (plan 25 item 54). Only a
+                // person opens a thread; a bot saying another bot's name does
+                // not put the two of them in one.
+                if (!senderIsBot)
+                    Governor_NoteThreadHolder(chosen->GetGUID(), player->GetGUID(), scopeKey);
+
                 if(g_DebugEnabled)
                 {
-                    LOG_INFO("module.ollamachat", "[Ollama Chat] Bot {} selected (mentioned first at position {})", 
+                    LOG_INFO("module.ollamachat", "[Ollama Chat] Bot {} selected (mentioned first at position {})",
                             chosen->GetName(), mentionedBots.front().first);
                 }
             }
@@ -1829,26 +1838,17 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         return;
     }
     
-    if (finalCandidates.size() > g_MaxBotsToPick)
-    {
-        std::random_device rd;
-        std::mt19937 g(rd());
-        std::shuffle(finalCandidates.begin(), finalCandidates.end(), g);
-        uint32_t countToPick = urand(1, g_MaxBotsToPick);
-        if(g_DebugEnabled)
-        {
-            LOG_INFO("module.ollamachat", "[Ollama Chat] Limiting {} bots to {} (MaxBotsToPick)", finalCandidates.size(), countToPick);
-        }
-        finalCandidates.resize(countToPick);
-    }
-
     // The addressee pass: one cheap call decides who this line was aimed at,
     // before anyone spends a generation answering it.
     //
-    // Deliberately placed AFTER the MaxBotsToPick cut above, so that when the
-    // pass fails -- lane down, answer unparseable, a name matching nobody --
-    // the fallback is exactly the set that would have answered without it,
-    // never a wider one.
+    // The MaxBotsToPick cut used to run HERE, before the pass. That was wrong
+    // in one specific way (plan 25 item 54): it is a random 1-in-N draw, so the
+    // single bot the person was mid-conversation with could be discarded before
+    // anything got to choose, and no amount of context given to the pass could
+    // recover a candidate that was already gone. The cut now runs inside the
+    // resolver, applied to whatever it picked -- and on the fallback path it
+    // still cuts to exactly the same size, so a pass that fails is never wider
+    // than it was before the pass existed.
     //
     // Nothing to decide, no call: one candidate needs no choosing, and a line
     // that named a bot already short-circuited to a single candidate earlier.
@@ -1895,11 +1895,42 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             if (context.empty())
                 context = "(nothing was said before this)\n";
 
+            // Who this person is already mid-exchange with here, snapshotted
+            // now: the resolver runs a round trip later, and the question it
+            // has to answer is who held the thread when they spoke. Only named
+            // in the prompt when the holder is one of the candidates -- telling
+            // the model about a bot it cannot choose invites it to choose them.
+            std::string holderLine;
+            if (!senderIsBot)
+            {
+                pass.holderGuid = Governor_ThreadHolder(player->GetGUID(), scopeKey);
+
+                if (pass.holderGuid)
+                {
+                    for (size_t i = 0; i < pass.candidateGuids.size(); ++i)
+                    {
+                        if (pass.candidateGuids[i] != pass.holderGuid)
+                            continue;
+
+                        pass.holderName = pass.candidateNames[i];
+                        holderLine = player->GetName() + " has been talking with " +
+                                     pass.holderName + ".\n";
+                        break;
+                    }
+
+                    // Live, but no longer in the running -- in combat, or it
+                    // failed its roll. The resolver checks the same thing.
+                    if (pass.holderName.empty())
+                        pass.holderGuid = 0;
+                }
+            }
+
             pass.prompt = SafeFormat(g_AddresseePromptTemplate,
                                      fmt::arg("speaker_name", player->GetName()),
                                      fmt::arg("message", trimmedMsg),
                                      fmt::arg("candidates", candidateList),
                                      fmt::arg("context", context),
+                                     fmt::arg("holder", holderLine),
                                      fmt::arg("max_names", pass.maxSpeakers));
 
             // Handed off: the replies are submitted by the resolver when the
@@ -1911,6 +1942,23 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         }
     }
     
+    // Reached only when the pass did not take the line: it is off, there was
+    // nothing to decide, or the dispatcher queue was full. Cut exactly as we
+    // always did, so this path is never wider than it was before the pass
+    // existed -- the resolver applies the same cut on its own fallback.
+    if (finalCandidates.size() > g_MaxBotsToPick)
+    {
+        std::random_device rd;
+        std::mt19937 g(rd());
+        std::shuffle(finalCandidates.begin(), finalCandidates.end(), g);
+        uint32_t countToPick = urand(1, g_MaxBotsToPick);
+        if(g_DebugEnabled)
+        {
+            LOG_INFO("module.ollamachat", "[Ollama Chat] Limiting {} bots to {} (MaxBotsToPick)", finalCandidates.size(), countToPick);
+        }
+        finalCandidates.resize(countToPick);
+    }
+
     if(g_DebugEnabled && !finalCandidates.empty())
     {
         std::string botNames;
@@ -1937,7 +1985,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
 bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
                           const std::string& trimmedMsg, ChatChannelSourceLocal sourceLocal,
                           Channel* channel, uint8_t chainDepth, const std::string& scopeKey,
-                          bool senderIsBot)
+                          bool senderIsBot, uint32_t extraDelayMs)
 {
     if (!bot || !sender)
         return false;
@@ -1976,6 +2024,7 @@ bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
     request.botName     = bot->GetName();
     request.maxWords    = maxWords;
     request.originMessage = msg;
+    request.extraDelayMs  = extraDelayMs;
     request.kind = (g_RoleplayEnable && g_RoleplayStrictness >= 1)
                        ? OllamaRequestKind::RoleplayReply
                        : OllamaRequestKind::ChatReply;

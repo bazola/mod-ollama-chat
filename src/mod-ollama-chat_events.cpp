@@ -16,6 +16,7 @@
 #include "AchievementMgr.h"
 #include "Containers.h"
 #include "GameObject.h"
+#include "Group.h"
 #include "Guild.h"
 #include "Item.h"
 #include "Log.h"
@@ -263,10 +264,23 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
             isGuildEvent ? SRC_GUILD_LOCAL
                          : (partyAudience ? SRC_PARTY_LOCAL : SRC_SAY_LOCAL);
 
+        // Party events key on the GROUP, exactly as a party line does in
+        // ProcessChat. Keying them on the zone put a bot's remark about your
+        // loot in a different conversation space from the party chat it was
+        // said in -- so it counted for no cooldown, no repetition history and,
+        // since plan 25 item 54, no thread: a bot could remark on your drop and
+        // still not be who you were talking to.
+        uint32_t scopeGroupOrZone = bot->GetZoneId();
+        if (source_ == SRC_PARTY_LOCAL)
+        {
+            if (Group* botGroup = bot->GetGroup())
+                scopeGroupOrZone = botGroup->GetGUID().GetCounter();
+        }
+
         const std::string scopeKey = Governor_MakeScopeKey(
             ChatChannelSourceLocalStr[source_], 0, "",
             source_ == SRC_GUILD_LOCAL ? bot->GetGuildId() : 0,
-            bot->GetZoneId());
+            scopeGroupOrZone);
 
         if (!Governor_CanSend(bot->GetGUID(), scopeKey))
             continue;

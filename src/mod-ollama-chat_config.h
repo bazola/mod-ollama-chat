@@ -285,6 +285,21 @@ extern std::string g_AddresseePromptTemplate;
 // without them, and an empty verdict falls through to a random candidate.
 extern uint32_t    g_AddresseeContextLines;
 
+// The group branch (plan 25 item 59). A line aimed at the whole party used to
+// be the LEAST likely to draw more than one answer: group-directed and
+// nobody-directed both arrived as {"to":[]}, and that meant one voice chosen at
+// random. These cap how many answer instead, and space them out so a party
+// answering together reads as several people rather than one chord.
+extern uint32_t    g_AddresseeGroupSpeakers;
+extern uint32_t    g_AddresseeGroupStaggerMs;
+
+// The thread holder (plan 25 item 54). How long the bot a person is
+// mid-exchange with keeps the thread through silence: the base window, plus a
+// little for each turn already taken, up to the cap.
+extern uint32_t    g_HolderWindowSeconds;
+extern uint32_t    g_HolderTurnBonusSeconds;
+extern uint32_t    g_HolderMaxBonusSeconds;
+
 // Bots starting something (plan 25 item 40). An ambient line about a person can
 // be aimed AT that person instead of at the room: naming them short-circuits the
 // candidate scan and counts as direct address, so they answer, and promptly.

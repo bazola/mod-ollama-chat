@@ -183,6 +183,11 @@ bool        g_AddresseeEnable         = false;
 uint32_t    g_AddresseeMinCandidates  = 2;
 uint32_t    g_AddresseeContextLines   = 4;
 std::string g_AddresseePromptTemplate;
+uint32_t    g_AddresseeGroupSpeakers  = 3;
+uint32_t    g_AddresseeGroupStaggerMs = 1800;
+uint32_t    g_HolderWindowSeconds     = 45;
+uint32_t    g_HolderTurnBonusSeconds  = 5;
+uint32_t    g_HolderMaxBonusSeconds   = 45;
 bool        g_InitiateEnable          = false;
 uint32_t    g_InitiateChance          = 25;
 std::string g_InitiateDirective;
@@ -1046,6 +1051,16 @@ void LoadOllamaChatConfig()
     g_AddresseeEnable        = sConfigMgr->GetOption<bool>("OllamaChat.Addressee.Enable", false);
     g_AddresseeMinCandidates = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.MinCandidates", 2);
     g_AddresseeContextLines  = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.ContextLines", 4);
+
+    // The group branch and the thread holder (plan 25 items 59 and 54). Both
+    // are corrections to how this pass reads its own verdict rather than new
+    // features, so they default to on -- unlike the pass itself, which had to
+    // earn its place in a playtest first.
+    g_AddresseeGroupSpeakers  = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.GroupSpeakers", 3);
+    g_AddresseeGroupStaggerMs = sConfigMgr->GetOption<uint32_t>("OllamaChat.Addressee.GroupStaggerMs", 1800);
+    g_HolderWindowSeconds     = sConfigMgr->GetOption<uint32_t>("OllamaChat.Holder.WindowSeconds", 45);
+    g_HolderTurnBonusSeconds  = sConfigMgr->GetOption<uint32_t>("OllamaChat.Holder.TurnBonusSeconds", 5);
+    g_HolderMaxBonusSeconds   = sConfigMgr->GetOption<uint32_t>("OllamaChat.Holder.MaxBonusSeconds", 45);
     // Braces that are part of the JSON, not a placeholder, must be doubled:
     // SafeFormat is fmt::vformat, so a bare { opens a format field and the whole
     // template comes back as the literal string "[Format Error]".
@@ -1059,14 +1074,16 @@ void LoadOllamaChatConfig()
         "People are talking in Azeroth.\n"
         "What was said just before, oldest first:\n{context}"
         "{speaker_name} just said: \"{message}\"\n"
-        "These people are close enough to answer: {candidates}\n"
+        "These people are close enough to answer: {candidates}\n{holder}"
         "Was that aimed at one of them in particular? Most talk is not: a remark "
         "to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} "
         "unless the words name one of them, or plainly answer something only one "
         "of them could have said - then answer {{\"to\":[\"name\"]}} with that one "
         "name. A follow-up that names nobody - \"yours?\", \"where did you find "
         "it?\", \"is it far?\" - is aimed at whoever raised that subject in the "
-        "lines above. Reply with JSON and nothing else.");
+        "lines above. If it was said to all of them at once - a greeting, or a "
+        "question put to the whole party - answer {{\"group\":true}} instead. "
+        "Reply with JSON and nothing else.");
 
     // Bots starting something. When an ambient topic is about a specific person
     // who is close enough to hear, this turns the line toward them instead of

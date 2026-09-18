@@ -64,6 +64,16 @@ namespace
         std::unordered_map<uint64_t, std::unordered_map<std::string, TimePoint>> conversations;
     };
 
+    // Who a person is mid-exchange with in one scope, and how deep it has run.
+    // Kept per scope rather than per bot because the question routing asks is
+    // "who holds the thread here", and the asker does not yet know the bot.
+    struct ThreadHolder
+    {
+        uint64_t  botGuid = 0;
+        TimePoint lastLineAt{};
+        uint32_t  turns    = 0;
+    };
+
     struct ScopeState
     {
         TimePoint             lastHuman{};
@@ -73,6 +83,9 @@ namespace
 
         // What was actually said here, and by whom.
         std::deque<SpokenLine> lines;
+
+        // Player guid -> the bot they are mid-exchange with here.
+        std::unordered_map<uint64_t, ThreadHolder> holders;
     };
 
     std::unordered_map<uint64_t, BotState>    g_bots;
@@ -86,6 +99,18 @@ namespace
         if (t.time_since_epoch().count() == 0)
             return 1e9;   // never happened
         return std::chrono::duration_cast<std::chrono::milliseconds>(now - t).count() / 1000.0;
+    }
+
+    // How long this holder survives silence. An exchange that has run several
+    // turns earns a longer pause than an opening line does -- people stop to
+    // fight something and come back to what they were saying -- and the cap
+    // stops a long conversation owning the thread indefinitely.
+    inline double HolderWindowFor(const ThreadHolder& h)
+    {
+        const double bonus =
+            std::min<double>(double(h.turns) * double(g_HolderTurnBonusSeconds),
+                             double(g_HolderMaxBonusSeconds));
+        return double(g_HolderWindowSeconds) + bonus;
     }
 
     void TrimWindow(std::deque<TimePoint>& times, TimePoint now, double windowSec)
@@ -409,6 +434,60 @@ bool Governor_InConversation(ObjectGuid botGuid, ObjectGuid playerGuid,
         return false;
 
     return SecondsSince(scopeIt->second, Clock::now()) <= double(g_ConversationWindowSeconds);
+}
+
+// --- the thread holder ----------------------------------------------------
+
+void Governor_NoteThreadHolder(ObjectGuid botGuid, ObjectGuid playerGuid,
+                               const std::string& scopeKey)
+{
+    if (!botGuid || !playerGuid || scopeKey.empty() || g_HolderWindowSeconds == 0)
+        return;
+
+    const TimePoint now = Clock::now();
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    ThreadHolder& h = g_scopes[scopeKey].holders[playerGuid.GetRawValue()];
+
+    // The same bot answering again is the exchange running on, so the thread
+    // deepens. A different bot taking over starts a new one at turn one rather
+    // than inheriting the old one's earned patience.
+    if (h.botGuid == botGuid.GetRawValue() &&
+        SecondsSince(h.lastLineAt, now) <= HolderWindowFor(h))
+    {
+        ++h.turns;
+    }
+    else
+    {
+        h.botGuid = botGuid.GetRawValue();
+        h.turns   = 1;
+    }
+
+    h.lastLineAt = now;
+}
+
+uint64_t Governor_ThreadHolder(ObjectGuid playerGuid, const std::string& scopeKey)
+{
+    if (!playerGuid || scopeKey.empty() || g_HolderWindowSeconds == 0)
+        return 0;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    auto scopeIt = g_scopes.find(scopeKey);
+    if (scopeIt == g_scopes.end())
+        return 0;
+
+    auto it = scopeIt->second.holders.find(playerGuid.GetRawValue());
+    if (it == scopeIt->second.holders.end())
+        return 0;
+
+    // Checked on read as well as pruned on the tick: a holder that went stale
+    // between ticks must not be handed out as live.
+    if (SecondsSince(it->second.lastLineAt, Clock::now()) > HolderWindowFor(it->second))
+        return 0;
+
+    return it->second.botGuid;
 }
 
 // --- cooldowns and rate limits -------------------------------------------
@@ -821,6 +900,17 @@ void Governor_OnPlayerLogout(ObjectGuid guid)
         state.emoteReactions.erase(raw);
         state.conversations.erase(raw);
     }
+
+    // And from every thread: both as the person holding one, and as the bot
+    // being held onto. A bot that logs out must not keep the thread and leave
+    // the next unnamed follow-up going to nobody.
+    for (auto& [key, scope] : g_scopes)
+    {
+        scope.holders.erase(raw);
+
+        for (auto it = scope.holders.begin(); it != scope.holders.end(); )
+            it = (it->second.botGuid == raw) ? scope.holders.erase(it) : std::next(it);
+    }
 }
 
 void Governor_Update()
@@ -842,7 +932,13 @@ void Governor_Update()
                SecondsSince(s.history.front().when, now) > double(g_RepetitionWindowSeconds))
             s.history.pop_front();
 
+        for (auto hit = s.holders.begin(); hit != s.holders.end(); )
+            hit = (SecondsSince(hit->second.lastLineAt, now) > HolderWindowFor(hit->second))
+                      ? s.holders.erase(hit)
+                      : std::next(hit);
+
         const bool idle = s.history.empty() && s.sendTimes.empty() &&
+                          s.holders.empty() &&
                           SecondsSince(s.lastHuman, now) > staleAfter &&
                           SecondsSince(s.lastSend, now)  > staleAfter;
 

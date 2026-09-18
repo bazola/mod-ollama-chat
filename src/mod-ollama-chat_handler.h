@@ -50,10 +50,12 @@ std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textE
 // pass answers on a worker, and the bots it picks must then be submitted from
 // the world thread. Returns false when the governor, an empty prompt or a full
 // queue stopped it. World thread only.
+// `extraDelayMs` holds the spoken line back that much longer on top of the
+// typing simulation, so the group branch can space several speakers out.
 bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
                           const std::string& trimmedMsg, ChatChannelSourceLocal sourceLocal,
                           Channel* channel, uint8_t chainDepth, const std::string& scopeKey,
-                          bool senderIsBot);
+                          bool senderIsBot, uint32_t extraDelayMs = 0);
 
 // Bounded, distance-sorted snapshot helpers used by the prompt builders and
 // the topic engine.

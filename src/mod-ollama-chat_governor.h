@@ -53,6 +53,29 @@ void Governor_NoteConversation(ObjectGuid botGuid, ObjectGuid playerGuid,
 bool Governor_InConversation(ObjectGuid botGuid, ObjectGuid playerGuid,
                              const std::string& scopeKey);
 
+// --- the thread holder ----------------------------------------------------
+
+// Who a person is actually mid-exchange with here (plan 25 item 54).
+//
+// The open-conversation map above cannot serve this. It answers "is THIS bot
+// talking to them", per bot -- and routing has to ask the other question,
+// "which bot holds the thread here", before it knows which bot to ask about.
+// That is why the state existed and routing still picked at random: measured
+// 2026-09-17, 11 of 21 unnamed follow-ups went to a bot that was not the one
+// the person had been talking to.
+//
+// Set when a bot's line aimed at a real person is delivered, and when a person
+// names a bot. Never recorded against another bot: a thread is something a
+// person is in.
+void Governor_NoteThreadHolder(ObjectGuid botGuid, ObjectGuid playerGuid,
+                               const std::string& scopeKey);
+
+// The bot holding the thread with this person here, or 0 when none is live.
+// Never returns a stale holder -- the window is checked on read, and it widens
+// a little as an exchange runs on, because a conversation four turns deep
+// survives a longer pause than one that has only just started.
+uint64_t Governor_ThreadHolder(ObjectGuid playerGuid, const std::string& scopeKey);
+
 // --- cooldowns and rate limits -------------------------------------------
 
 // Checks per-bot cooldown, per-scope cooldown, scope rate and global rate.

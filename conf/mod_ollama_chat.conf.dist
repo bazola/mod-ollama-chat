@@ -602,8 +602,12 @@ OllamaChat.EventRegisters = React in a few words.@12|React in a few words.@12|Re
 #                cost a call and change nothing; it can never produce silence.
 #
 #                Answers of the form {"to":["Name"]} pick that bot. {"to":[]}
-#                means the line was for the room, and one bot answers rather than
-#                all of them.
+#                means the line named nobody -- which is NOT the same as being
+#                meant for nobody: if the speaker is mid-exchange with a bot
+#                here, that bot answers (see OllamaChat.Holder.WindowSeconds),
+#                and only a line with no thread behind it falls through to a
+#                random candidate. {"group":true} means it was said to all of
+#                them, and OllamaChat.Addressee.GroupSpeakers answer.
 #
 #                Requires OllamaChat.Utility.Model to be set, or the classify
 #                call runs on the voice model and costs what it was meant to save.
@@ -635,6 +639,72 @@ OllamaChat.Addressee.MinCandidates = 2
 #                older context-free behaviour.
 #   Default:     4
 OllamaChat.Addressee.ContextLines = 4
+
+# OllamaChat.Addressee.GroupSpeakers
+#   Description: How many bots may answer a line aimed at the WHOLE party
+#                (plan 25 item 59), when the pass answers {"group":true}.
+#
+#                This case used to be inverted. Group-directed and
+#                nobody-directed both arrived as {"to":[]}, and that verdict
+#                meant "one candidate, chosen at random" -- so addressing the
+#                whole party made bots LESS likely to all answer, by design.
+#
+#                Capped rather than open, because the pile-on this pass was
+#                built to remove is the opposite failure: replies per player
+#                line ran at 2.50 before the pass and 1.06 after, and five
+#                parallel generations at 3.4-10.7 s apiece would queue behind
+#                four workers. Two or three keeps the feeling the note asked
+#                for -- the party answers, not one appointed voice -- while the
+#                bots passed over hold their tongue, which is what keeps the
+#                rest of the party present without speaking over it.
+#
+#                The actual number is drawn between 2 and this. 1 disables the
+#                branch in practice; 0 is treated as 1.
+#   Default:     3
+OllamaChat.Addressee.GroupSpeakers = 3
+
+# OllamaChat.Addressee.GroupStaggerMs
+#   Description: How far apart the group branch spaces its speakers, in
+#                milliseconds per speaker, on top of the typing simulation.
+#                Two replies landing in the same tick read as a pile-on even
+#                when the pass chose both of them deliberately. 0 sends them
+#                together.
+#   Default:     1800
+OllamaChat.Addressee.GroupStaggerMs = 1800
+
+# OllamaChat.Holder.WindowSeconds
+#   Description: The thread holder (plan 25 item 54). How long the bot a person
+#                is mid-exchange with keeps the thread through silence.
+#
+#                Conversation state already existed -- the governor records when
+#                each bot last answered each person -- but it was read in
+#                exactly one place, to raise that bot's reply CHANCE. Routing
+#                never consulted it, so an unnamed follow-up fell through to a
+#                random candidate: measured 2026-09-17, 11 of 21 went to a bot
+#                that was not the one the person had been talking to. "No need
+#                to be cynical, Grommell" was answered by Grommell; "Exactly",
+#                six seconds later, was answered by Kanlu.
+#
+#                Set when a bot's line aimed at a person is delivered, and when
+#                a person names a bot. 0 turns the holder off entirely and
+#                restores the random pick on an empty verdict.
+#   Default:     45
+OllamaChat.Holder.WindowSeconds = 45
+
+# OllamaChat.Holder.TurnBonusSeconds
+#   Description: Added to the window for each turn the exchange has already
+#                run. A conversation several turns deep survives a longer pause
+#                than an opening line does -- people break off to fight
+#                something and come back to what they were saying.
+#   Default:     5
+OllamaChat.Holder.TurnBonusSeconds = 5
+
+# OllamaChat.Holder.MaxBonusSeconds
+#   Description: The ceiling on that bonus, so a long exchange cannot hold the
+#                thread indefinitely. With the defaults a thread lives 45 s of
+#                silence at worst and 90 s at best.
+#   Default:     45
+OllamaChat.Holder.MaxBonusSeconds = 45
 
 # OllamaChat.Initiate.Enable
 #   Description: Let a bot START something (plan 25 item 40). Ambient chatter
@@ -749,8 +819,12 @@ OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said
 
 # OllamaChat.Addressee.PromptTemplate
 #   Description: The question put to the cheap lane. Placeholders: {speaker_name}
-#                {message} {candidates} {context} ({max_names} is also available,
-#                though the default below does not use it). {context} is the
+#                {message} {candidates} {context} {holder} ({max_names} is also
+#                available, though the default below does not use it).
+#                {holder} is one line naming the bot this person is already
+#                mid-exchange with, or empty when there is none and when that
+#                bot is not among the candidates -- naming a bot the model
+#                cannot pick only invites it to pick them. {context} is the
 #                preceding lines of the conversation, "Name: line" per line --
 #                see Addressee.ContextLines above. It must ask for JSON and
 #                nothing else -- the reply is read as {"to":[...]}, taking the
@@ -771,7 +845,7 @@ OllamaChat.HeldTongue.Prompt = "You are {bot_name}, in Azeroth. {from_name} said
 #            answer the default, took it from 2 of 4 to 6 of 6 on lines taken from
 #            a real playtest.
 #   Default:  the wording compiled in, which an absent or empty key restores.
-OllamaChat.Addressee.PromptTemplate = "People are talking in Azeroth.\nWhat was said just before, oldest first:\n{context}{speaker_name} just said: \"{message}\"\nThese people are close enough to answer: {candidates}\nWas that aimed at one of them in particular? Most talk is not: a remark to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} unless the words name one of them, or plainly answer something only one of them could have said - then answer {{\"to\":[\"name\"]}} with that one name. A follow-up that names nobody - \"yours?\", \"where did you find it?\", \"is it far?\" - is aimed at whoever raised that subject in the lines above. Reply with JSON and nothing else."
+OllamaChat.Addressee.PromptTemplate = "People are talking in Azeroth.\nWhat was said just before, oldest first:\n{context}{speaker_name} just said: \"{message}\"\nThese people are close enough to answer: {candidates}\n{holder}Was that aimed at one of them in particular? Most talk is not: a remark to the group, or thinking aloud, is aimed at no one. Answer {{\"to\":[]}} unless the words name one of them, or plainly answer something only one of them could have said - then answer {{\"to\":[\"name\"]}} with that one name. A follow-up that names nobody - \"yours?\", \"where did you find it?\", \"is it far?\" - is aimed at whoever raised that subject in the lines above. If it was said to all of them at once - a greeting, or a question put to the whole party - answer {{\"group\":true}} instead. Reply with JSON and nothing else."
 
 # --------------------------------------------
 # ENVIRONMENTAL/CONTEXTUAL TEMPLATES

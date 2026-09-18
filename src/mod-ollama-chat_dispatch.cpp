@@ -27,6 +27,7 @@
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -256,6 +257,11 @@ namespace
             if (g_TypingSimulationMaxDelay > 0 && delayMs > g_TypingSimulationMaxDelay)
                 delayMs = g_TypingSimulationMaxDelay;
         }
+
+        // Whatever the caller asked to be held back on top of that -- the group
+        // branch spacing its speakers, so a party answering together arrives as
+        // several people rather than all at once.
+        delayMs += task.request.extraDelayMs;
 
         // A delay, not a sleep. The old code held a whole thread hostage here.
         completion.deliverAt = Clock::now() + std::chrono::milliseconds(delayMs);
@@ -624,7 +630,8 @@ namespace
         };
 
         std::vector<std::string> named;
-        bool parsed = false;
+        bool parsed        = false;
+        bool groupDirected = false;
 
         // The model is asked for bare JSON but may wrap it in a sentence, so
         // take the outermost braces rather than trusting the whole string.
@@ -643,6 +650,39 @@ namespace
                             named.push_back(n.get<std::string>());
                     parsed = true;
                 }
+
+                // "Aimed at all of them" (plan 25 item 59). A separate key
+                // rather than a new shape for `to`, so a model that ignores the
+                // instruction still answers the old way and still parses: an
+                // answer without it behaves exactly as it did before this
+                // branch existed.
+                const auto grp = j.find("group");
+                if (grp != j.end())
+                {
+                    if (grp->is_boolean())
+                    {
+                        groupDirected = grp->get<bool>();
+                        parsed        = true;
+                    }
+                    else if (grp->is_string())
+                    {
+                        const std::string s = grp->get<std::string>();
+                        groupDirected = (s == "true" || s == "True" || s == "yes" || s == "Yes");
+                        parsed        = true;
+                    }
+                }
+
+                // Some models answer the group case by naming everyone instead,
+                // or by writing {"to":"all"}. Read both as the group branch
+                // rather than as three invented names.
+                if (!groupDirected && to != j.end() && to->is_string())
+                {
+                    const std::string s = to->get<std::string>();
+                    groupDirected = (s == "all" || s == "All" || s == "everyone" ||
+                                     s == "Everyone" || s == "group" || s == "Group");
+                    if (groupDirected)
+                        parsed = true;
+                }
             }
             catch (const std::exception&)
             {
@@ -652,31 +692,104 @@ namespace
 
         std::vector<size_t> speakers;
 
+        std::random_device rd;
+        std::mt19937       gen(rd());
+
+        // The random MaxBotsToPick cut. It used to run in ProcessChat BEFORE
+        // this pass, which meant the one bot the person was mid-conversation
+        // with could be thrown away at random before anything got to choose
+        // (plan 25 item 54). It runs here now, on whatever this resolver
+        // actually picked -- so the pass always sees every candidate that
+        // passed its roll, and the fallback below is still never wider than it
+        // was before the pass existed.
+        auto cutToMax = [&](std::vector<size_t>& v)
+        {
+            if (g_MaxBotsToPick == 0 || v.size() <= g_MaxBotsToPick)
+                return;
+
+            std::shuffle(v.begin(), v.end(), gen);
+            std::uniform_int_distribution<uint32_t> howMany(1, g_MaxBotsToPick);
+            v.resize(howMany(gen));
+        };
+
         auto takeAll = [&]()
         {
             speakers.clear();
             for (size_t i = 0; i < a.candidateGuids.size(); ++i)
                 speakers.push_back(i);
+            cutToMax(speakers);
         };
+
+        // Where the thread holder sits in the candidate list, if it is still
+        // one of them.
+        size_t holderIdx = SIZE_MAX;
+        if (a.holderGuid)
+        {
+            for (size_t i = 0; i < a.candidateGuids.size(); ++i)
+            {
+                if (a.candidateGuids[i] == a.holderGuid)
+                {
+                    holderIdx = i;
+                    break;
+                }
+            }
+        }
+
+        // How many of `speakers` may actually speak. 0 means all of them.
+        uint32_t speakerCap = 0;
 
         if (!parsed)
         {
             takeAll();
         }
+        else if (groupDirected)
+        {
+            // Item 59. A line to the whole party used to be the LEAST likely to
+            // draw more than one answer: group-directed and nobody-directed
+            // both arrived as {"to":[]}, and that meant one voice picked at
+            // random, so addressing everyone made bots less likely to answer.
+            //
+            // Capped rather than open. The note asks for all of them, but the
+            // pile-on this pass was built to remove is the other failure --
+            // 2.50 replies per line before it, 1.06 after -- and five parallel
+            // generations at 3.4-10.7 s apiece would queue behind four workers.
+            // The bots passed over here hold their tongue, which is what keeps
+            // the rest of the party present without speaking over it.
+            for (size_t i = 0; i < a.candidateGuids.size(); ++i)
+                speakers.push_back(i);
+
+            std::shuffle(speakers.begin(), speakers.end(), gen);
+
+            const uint32_t cap = std::max<uint32_t>(1, g_AddresseeGroupSpeakers);
+            const uint32_t low = std::min<uint32_t>(2, cap);
+            std::uniform_int_distribution<uint32_t> howMany(low, cap);
+
+            speakerCap = howMany(gen);
+        }
         else if (named.empty())
         {
-            // Said to the room rather than to anyone. One voice answers instead
-            // of all of them, which is the point of the pass.
-            if (!a.candidateGuids.empty())
+            // Items 54 and 63. An empty verdict means the line named nobody --
+            // not that it was meant for nobody. If this person is mid-exchange
+            // with a bot here, that bot answers: "Exactly", or "Are you an
+            // engineer?", belongs to whoever just spoke, and handing it to a
+            // random voice is what made the operator correct himself thirty
+            // seconds later. Random only when there is no thread at all.
+            speakerCap = 1;
+
+            if (holderIdx != SIZE_MAX)
             {
-                std::random_device rd;
-                std::mt19937 gen(rd());
+                speakers.push_back(holderIdx);
+            }
+            else if (!a.candidateGuids.empty())
+            {
                 std::uniform_int_distribution<size_t> pick(0, a.candidateGuids.size() - 1);
                 speakers.push_back(pick(gen));
             }
         }
         else
         {
+            speakerCap = a.maxSpeakers;
+
             for (const std::string& want : named)
             {
                 for (size_t i = 0; i < a.candidateNames.size(); ++i)
@@ -714,15 +827,55 @@ namespace
 
             Channel* channel = a.channelId ? OllamaResolveZoneChannel(bot, a.channelId) : nullptr;
 
+            // Only the group branch spaces its speakers. Everywhere else one
+            // bot answers, and there is nothing to space it against.
+            const uint32_t extraDelayMs =
+                groupDirected ? spoken * g_AddresseeGroupStaggerMs : 0;
+
             if (OllamaSubmitBotReply(bot, sender, a.msg, a.trimmedMsg, a.source, channel,
-                                     a.chainDepth, a.scopeKey, a.senderIsBot))
+                                     a.chainDepth, a.scopeKey, a.senderIsBot, extraDelayMs))
             {
                 ++spoken;
                 spokeIdx.push_back(idx);
                 if (firstSpeakerName.empty())
                     firstSpeakerName = bot->GetName();
-                if (parsed && a.maxSpeakers > 0 && spoken >= a.maxSpeakers)
+                if (speakerCap > 0 && spoken >= speakerCap)
                     break;
+            }
+        }
+
+        // The one bot this pass chose was refused by the governor -- a cooldown,
+        // a rate limit, an empty prompt. Handing the line to the next candidate
+        // is better than the silence that used to follow, which reads as the
+        // bots being broken rather than as one of them being busy (plan 25 §21).
+        //
+        // Only where the pass actually chose: on the fallback path every
+        // candidate was tried already.
+        if (spoken == 0 && parsed)
+        {
+            for (size_t i = 0; i < a.candidateGuids.size(); ++i)
+            {
+                bool alreadyTried = false;
+                for (size_t s : speakers)
+                    if (s == i)
+                        alreadyTried = true;
+                if (alreadyTried)
+                    continue;
+
+                Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(a.candidateGuids[i]));
+                if (!bot || !bot->IsInWorld() || !bot->IsAlive())
+                    continue;
+
+                Channel* channel = a.channelId ? OllamaResolveZoneChannel(bot, a.channelId) : nullptr;
+
+                if (OllamaSubmitBotReply(bot, sender, a.msg, a.trimmedMsg, a.source, channel,
+                                         a.chainDepth, a.scopeKey, a.senderIsBot))
+                {
+                    ++spoken;
+                    spokeIdx.push_back(i);
+                    firstSpeakerName = bot->GetName();
+                    break;
+                }
             }
         }
 
@@ -911,8 +1064,16 @@ namespace
         {
             Player* addressee = ObjectAccessor::FindConnectedPlayer(ObjectGuid(c.request.targetGuid));
             if (OllamaIsRealPlayer(addressee))
+            {
                 Governor_NoteConversation(botGuid, ObjectGuid(c.request.targetGuid),
                                           c.request.scopeKey);
+
+                // And this bot now holds the thread here, so the person's next
+                // line that names nobody stays with it instead of going to a
+                // random voice (plan 25 item 54).
+                Governor_NoteThreadHolder(botGuid, ObjectGuid(c.request.targetGuid),
+                                          c.request.scopeKey);
+            }
         }
 
         // Body language. Safe here and only here: this is the world thread.

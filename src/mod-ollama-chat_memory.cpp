@@ -318,9 +318,20 @@ void Memory_LoadHouseholds()
     std::string prefix = Lower(sConfigMgr->GetOption<std::string>(
         "AiPlayerbot.RandomBotAccountPrefix", "rndbot"));
 
-    // Which accounts are a person's. Asked of the login database because that is where the name lives.
+    // Which accounts are a person's. Two tests, because neither alone is right here:
+    //
+    //   - not the random-bot prefix: 156 accounts on this realm are "rndbot<n>";
+    //   - and has actually been signed into. This one catches the accounts that hold characters but no
+    //     person: MERCHANTS (plans/17) owns ten level-1 traders who have never drawn breath, and the
+    //     prefix test alone would have declared all ten of them people and held back any memory naming
+    //     Tobble or Merrick. Playerbots never sets last_login -- 106 of them were online while this was
+    //     measured and not one had a value -- so it separates furniture from people cleanly.
+    //
+    // A new player is unprotected until their first login, which costs nothing: nobody can hold a memory
+    // about someone who has never been here.
     std::unordered_set<uint32_t> real;
-    if (QueryResult result = LoginDatabase.Query("SELECT id, username FROM account"))
+    if (QueryResult result = LoginDatabase.Query(
+            "SELECT id, username FROM account WHERE last_login IS NOT NULL"))
     {
         do
         {

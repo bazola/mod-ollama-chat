@@ -134,14 +134,38 @@ namespace
             if (it != g_BotConversationHistory.end())
             {
                 for (auto& [playerGuid, turns] : it->second)
-                {
                     while (turns.size() > g_MaxConversationHistory)
                         turns.pop_front();
-                    // The DELETE below takes every row for this bot, so the turns we keep have to be
-                    // written again or a restart would lose them.
+
+                // The trigger counts every conversation this bot is holding, not one of them, so keeping a
+                // full prompt window for each would leave a busy bot still over the threshold the moment it
+                // finished condensing -- and it would condense again on the very next line, once per
+                // exchange, for ever. At ~44 tokens a turn that starts at about seven people talking to the
+                // same bot at once. Drop the oldest turn from the longest conversation until there is real
+                // headroom, so the next condensation needs new words to reach it.
+                const uint32_t headroom = g_MemoryHistoryTokenLimit / 2;
+                while (g_MemoryHistoryTokenLimit > 0)
+                {
+                    uint32_t total = 0;
+                    std::deque<BotConversationEntry>* longest = nullptr;
+                    for (auto& [playerGuid, turns] : it->second)
+                    {
+                        for (const BotConversationEntry& turn : turns)
+                            total += Memory_EstimateTokens(turn.playerMessage)
+                                   + Memory_EstimateTokens(turn.botReply);
+                        if (!turns.empty() && (!longest || turns.size() > longest->size()))
+                            longest = &turns;
+                    }
+                    if (total < headroom || !longest)
+                        break;
+                    longest->pop_front();
+                }
+
+                // The DELETE below takes every row for this bot, so the turns we keep have to be written
+                // again or a restart would lose them.
+                for (auto& [playerGuid, turns] : it->second)
                     for (BotConversationEntry& turn : turns)
                         turn.persisted = false;
-                }
             }
         }
 

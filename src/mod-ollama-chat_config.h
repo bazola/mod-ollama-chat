@@ -361,6 +361,7 @@ extern std::string g_EmoteReactionPromptTemplate;
 extern bool        g_MemoryEnable;
 extern uint32_t    g_MemoryHistoryTokenLimit;   // condense once history exceeds this
 extern uint32_t    g_MemoryHistoryKeep;         // turns kept for the condenser, beyond what the prompt shows
+extern bool        g_MemoryHouseholdGate;       // hold back memories naming an absent person's characters
 extern uint32_t    g_SnapshotTheirTasks;        // errands of the person spoken to, named to their companions
 extern uint32_t    g_MemoryPromptTokenBudget;   // how much of the prompt memories may use
 extern uint32_t    g_MemoryMaxPerBot;

@@ -7,6 +7,7 @@
 #include "mod-ollama-chat_roleplay.h"
 #include "mod-ollama-chat-utilities.h"
 
+#include "Config.h"
 #include "DatabaseEnv.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
@@ -21,6 +22,7 @@
 #include <cctype>
 #include <ctime>
 #include <mutex>
+#include <unordered_set>
 #include <unordered_map>
 
 namespace
@@ -292,6 +294,100 @@ void Memory_Load()
 
         LOG_INFO("module.ollamachat", "[Ollama Chat] Loaded {} bot relationships.", loaded);
     }
+}
+
+namespace
+{
+    // Characters belonging to a real person, by lower-cased name -> account id. Playerbots hold accounts
+    // too, so the test is the account, not the character: every bot account is the configured random-bot
+    // prefix ("rndbot") and nothing else is. 5 rows here today, 157 bot accounts beside them.
+    std::unordered_map<std::string, uint32_t> g_RealCharAccount;
+    std::unordered_map<uint32_t, uint32_t>    g_AccountOfGuid;     // character guid (counter) -> account
+    std::mutex                                g_HouseholdMutex;
+
+    std::string Lower(std::string v)
+    {
+        for (char& c : v)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return v;
+    }
+}
+
+void Memory_LoadHouseholds()
+{
+    std::string prefix = Lower(sConfigMgr->GetOption<std::string>(
+        "AiPlayerbot.RandomBotAccountPrefix", "rndbot"));
+
+    // Which accounts are a person's. Asked of the login database because that is where the name lives.
+    std::unordered_set<uint32_t> real;
+    if (QueryResult result = LoginDatabase.Query("SELECT id, username FROM account"))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            if (Lower(f[1].Get<std::string>()).rfind(prefix, 0) != 0)
+                real.insert(f[0].Get<uint32_t>());
+        } while (result->NextRow());
+    }
+
+    std::unordered_map<std::string, uint32_t> names;
+    std::unordered_map<uint32_t, uint32_t>    accounts;
+    if (QueryResult result = CharacterDatabase.Query("SELECT guid, name, account FROM characters"))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            const uint32_t account = f[2].Get<uint32_t>();
+            accounts[f[0].Get<uint32_t>()] = account;
+            if (real.count(account))
+                names[Lower(f[1].Get<std::string>())] = account;
+        } while (result->NextRow());
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_HouseholdMutex);
+        g_RealCharAccount = std::move(names);
+        g_AccountOfGuid   = std::move(accounts);
+    }
+
+    LOG_INFO("module.ollamachat",
+             "[Ollama Chat] {} characters on {} real accounts are protected from memory bleed.",
+             g_RealCharAccount.size(), real.size());
+}
+
+// Would telling this memory here carry one person's doings to another person? A memory naming a character
+// who belongs to a real account is held back unless someone of that household is here to hear it.
+//
+// Ranking cannot do this job: plan 31 §5 deliberately reserves a share of the prompt for a bot's own
+// defining memories, unconditioned by context, and that share is exactly the hole a memory about an absent
+// player would come through. Withholding has to be a gate, separate from the score. 140 of the 330 memories
+// on this realm name one of the operator's five characters, held by 47 different bots.
+//
+// The test is a name in the text, which is crude -- it is what plan 31's tags replace. Crude is safe in this
+// direction: a false positive withholds a memory, a false negative is only what happens today.
+bool Memory_MayTell(const std::string& text, const std::unordered_set<uint32_t>& presentAccounts)
+{
+    std::lock_guard<std::mutex> lock(g_HouseholdMutex);
+    if (g_RealCharAccount.empty())
+        return true;
+
+    const std::string hay = Lower(text);
+    for (auto const& [name, account] : g_RealCharAccount)
+    {
+        if (presentAccounts.count(account))
+            continue;                       // their own household is here; nothing is being carried
+        size_t pos = 0;
+        while ((pos = hay.find(name, pos)) != std::string::npos)
+        {
+            const bool startOk = (pos == 0) || !std::isalnum(static_cast<unsigned char>(hay[pos - 1]));
+            const size_t end = pos + name.size();
+            const bool endOk = (end >= hay.size()) || !std::isalnum(static_cast<unsigned char>(hay[end]));
+            if (startOk && endOk)
+                return false;
+            pos = end;
+        }
+    }
+    return true;
 }
 
 void Memory_Remember(uint64_t botGuid, const std::string& text, uint8_t importance)
@@ -580,16 +676,44 @@ std::string Memory_BuildPromptSection(Player* bot, Player* about)
                       return a.createdAt > b.createdAt;
                   });
 
+        // Whose doings may be spoken of here: the person being answered, and everyone standing with this
+        // bot. Cheap -- a party is at most five, and the map lookup is a hash.
+        std::unordered_set<uint32_t> present;
+        auto note = [&present](Player* p)
+        {
+            if (!p)
+                return;
+            std::lock_guard<std::mutex> lock(g_HouseholdMutex);
+            auto it = g_AccountOfGuid.find(p->GetGUID().GetCounter());
+            if (it != g_AccountOfGuid.end())
+                present.insert(it->second);
+        };
+        note(about);
+        note(bot);
+        if (Group* group = bot->GetGroup())
+            for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+                note(ref->GetSource());
+
         std::string lines;
         uint32_t used = 0;
+        uint32_t withheld = 0;
         for (const BotMemoryEntry& m : memories)
         {
             const uint32_t cost = Memory_EstimateTokens(m.text) + 4;
             if (g_MemoryPromptTokenBudget > 0 && used + cost > g_MemoryPromptTokenBudget)
                 continue;      // try the next, shorter one rather than stopping
+            if (g_MemoryHouseholdGate && !Memory_MayTell(m.text, present))
+            {
+                ++withheld;
+                continue;
+            }
             lines += " - " + m.text + "\n";
             used += cost;
         }
+
+        if (withheld && g_DebugEnabled)
+            LOG_INFO("module.ollamachat", "[Ollama Chat] {} held back {} memories about absent households.",
+                     bot->GetName(), withheld);
 
         if (!lines.empty())
             out += SafeFormat(g_MemoryPromptTemplate, fmt::arg("memories", lines));

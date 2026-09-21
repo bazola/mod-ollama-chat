@@ -225,6 +225,7 @@ std::string g_EmoteReactionPromptTemplate;
 bool        g_MemoryEnable             = true;
 uint32_t    g_MemoryHistoryTokenLimit  = 1500;
 uint32_t    g_MemoryHistoryKeep        = 40;
+bool        g_MemoryHouseholdGate      = true;
 uint32_t    g_SnapshotTheirTasks       = 3;
 uint32_t    g_MemoryPromptTokenBudget  = 400;
 uint32_t    g_MemoryMaxPerBot          = 40;
@@ -689,6 +690,7 @@ void LoadOllamaChatConfig()
     g_MemoryEnable                 = sConfigMgr->GetOption<bool>("OllamaChat.Memory.Enable", true);
     g_MemoryHistoryTokenLimit      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.HistoryTokenLimit", 1500);
     g_MemoryHistoryKeep            = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.HistoryKeep", 40);
+    g_MemoryHouseholdGate          = sConfigMgr->GetOption<bool>("OllamaChat.Memory.HouseholdGate", true);
     g_SnapshotTheirTasks           = sConfigMgr->GetOption<uint32_t>("OllamaChat.Snapshot.TheirTasks", 3);
     g_MemoryPromptTokenBudget      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.PromptTokenBudget", 400);
     g_MemoryMaxPerBot              = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.MaxPerBot", 40);
@@ -1327,6 +1329,7 @@ void OllamaChatConfigWorldScript::OnStartup()
     InitializeSentimentTracking();
     Roleplay_Load();
     Memory_Load();
+    Memory_LoadHouseholds();
 
     // Spread the three periodic saves so they do not all come due on the same
     // world tick. Each is incremental now, but they queue onto one database

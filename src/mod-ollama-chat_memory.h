@@ -3,6 +3,7 @@
 
 #include "ObjectGuid.h"
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include <cstdint>
 
@@ -55,6 +56,8 @@ struct BotRelationship
 };
 
 void Memory_Load();
+void Memory_LoadHouseholds();
+bool Memory_MayTell(const std::string& text, const std::unordered_set<uint32_t>& presentAccounts);
 void Memory_SaveAll();
 void Memory_ForgetBot(ObjectGuid botGuid);
 

@@ -60,6 +60,7 @@ bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
 
 // Bounded, distance-sorted snapshot helpers used by the prompt builders and
 // the topic engine.
+bool OllamaSameCompany(Player* a, Player* b);
 std::string ChatHandler_DescribeTheirDoings(Player* bot, Player* about);
 std::string GenerateBotGameStateSnapshot(Player* bot);
 

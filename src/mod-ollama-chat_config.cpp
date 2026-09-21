@@ -79,6 +79,10 @@ bool        g_DisableRepliesInCombat          = true;   // legacy; now only the 
 bool        g_CombatReplies                   = true;
 bool        g_CombatEvents                    = true;
 bool        g_CombatAmbient                   = false;
+bool        g_PartyChatterEnable              = false;
+uint32_t    g_PartyChatterChance              = 35;
+uint32_t    g_PartyChatterGlobalPerMinute     = 6;
+uint32_t    g_PartyChatterCompanySeconds      = 150;
 bool        g_EnableRandomChatter             = true;
 bool        g_EnableEventChatter              = true;
 bool        g_EnableRPPersonalities           = false;
@@ -589,6 +593,12 @@ void LoadOllamaChatConfig()
     g_CombatEvents                    = sConfigMgr->GetOption<bool>("OllamaChat.Combat.Events", true);
     g_CombatAmbient                   = sConfigMgr->GetOption<bool>("OllamaChat.Combat.Ambient",
                                                                     !g_DisableRepliesInCombat);
+    // A company of bots is an audience for itself (plans/31 §19). Off by default: it is the only path that
+    // spends inference with nobody logged in.
+    g_PartyChatterEnable              = sConfigMgr->GetOption<bool>("OllamaChat.PartyChatter.Enable", false);
+    g_PartyChatterChance              = sConfigMgr->GetOption<uint32_t>("OllamaChat.PartyChatter.Chance", 35);
+    g_PartyChatterGlobalPerMinute     = sConfigMgr->GetOption<uint32_t>("OllamaChat.PartyChatter.GlobalPerMinute", 6);
+    g_PartyChatterCompanySeconds      = sConfigMgr->GetOption<uint32_t>("OllamaChat.PartyChatter.CompanySeconds", 150);
     g_EnableRandomChatter             = sConfigMgr->GetOption<bool>("OllamaChat.EnableRandomChatter", true);
     g_EnableEventChatter              = sConfigMgr->GetOption<bool>("OllamaChat.EnableEventChatter", true);
     g_EnableWhisperReplies            = sConfigMgr->GetOption<bool>("OllamaChat.EnableWhisperReplies", false);

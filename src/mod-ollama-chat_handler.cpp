@@ -624,7 +624,10 @@ void ProcessBotChatMessage(Player* bot, const std::string& msg, ChatChannelSourc
                         break;
                     }
                 }
-                canSendMessage = hasRealPlayer;
+                // A company of bots answers itself when PartyChatter is on. Without this a line spoken on
+                // the road is heard by no one and the exchange never becomes a memory: one bot talking to
+                // silence is not a conversation, and the condenser has nothing to condense (plans/31 §19).
+                canSendMessage = hasRealPlayer || (g_PartyChatterEnable && group->GetMembersCount() >= 2);
                 if (!canSendMessage && g_DebugEnabled)
                     LOG_INFO("module.ollamachat", "[Ollama Chat] No bot replies to {} in Party - no real players in group", bot->GetName());
             }
@@ -1201,6 +1204,15 @@ std::string ChatHandler_DescribeTheirDoings(Player* bot, Player* about)
     }
 
     return "\n" + out + "\n";
+}
+
+// Two players in one group, neither of them alone in it.
+bool OllamaSameCompany(Player* a, Player* b)
+{
+    if (!a || !b || a == b)
+        return false;
+    Group* group = a->GetGroup();
+    return group && group == b->GetGroup();
 }
 
 std::string GenerateBotGameStateSnapshot(Player* bot)
@@ -2110,7 +2122,13 @@ bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
                        ? OllamaRequestKind::RoleplayReply
                        : OllamaRequestKind::ChatReply;
     request.triggerBotReplies = (sourceLocal != SRC_WHISPER_LOCAL);
-    request.recordHistory     = !senderIsBot;
+    // Remember an exchange with a person always, and with a companion when they are in the same company.
+    // This was `!senderIsBot`, so everything bots said to each other was forgotten the moment it was said:
+    // no conversation history, therefore nothing for the condenser, therefore no memory of an outing ever
+    // (plans/31 §19). Bounded to the same company on purpose -- a remark overheard from a stranger on the
+    // road is not a thing to carry around, and pairing every bot with every passer-by would multiply the
+    // history table by the size of the realm.
+    request.recordHistory     = !senderIsBot || OllamaSameCompany(bot, sender);
     request.updateSentiment   = !senderIsBot && g_EnableSentimentTracking;
 
     if (!OllamaDispatch_Submit(std::move(request)))

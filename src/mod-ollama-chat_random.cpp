@@ -29,6 +29,7 @@
 
 #include <ctime>
 #include <mutex>
+#include <deque>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -47,6 +48,59 @@ namespace
     }
 
     // Decide where an ambient line would go, before spending an LLM call on it.
+    // A company of bots that is really together: in one group, nobody real in it, and at least one
+    // companion close enough to be spoken to. Without the distance test a "party" spread over a continent
+    // would talk to itself (plans/31 §19).
+    bool BotOnlyCompanyTogether(Player* bot)
+    {
+        Group* group = bot->GetGroup();
+        if (!group || group->GetMembersCount() < 2)
+            return false;
+
+        bool companionNear = false;
+        for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+        {
+            Player* member = ref->GetSource();
+            if (!member || !member->IsInWorld())
+                continue;
+            PlayerbotAI* memberAI = PlayerbotsMgr::instance().GetPlayerbotAI(member);
+            if (!memberAI || !memberAI->IsBotAI())
+                return false;               // somebody real is here; the usual rules apply
+            if (member != bot && member->IsAlive() && bot->IsWithinDistInMap(member, g_SayDistance))
+                companionNear = true;
+        }
+        return companionNear;
+    }
+
+    // Per-company and realm-wide pacing for bot-only party talk, kept apart from the governor's own limits
+    // so the operator can open or close this one tap without touching what bots say to people.
+    std::mutex                              g_partyTalkMutex;
+    std::unordered_map<uint32_t, time_t>    g_partyNextTalk;    // group low guid -> when it may speak again
+    std::deque<time_t>                      g_partySends;
+
+    bool PartyTalkAllowed(Player* bot, time_t now)
+    {
+        Group* group = bot->GetGroup();
+        if (!group)
+            return false;
+
+        std::lock_guard<std::mutex> lock(g_partyTalkMutex);
+
+        while (!g_partySends.empty() && g_partySends.front() <= now - 60)
+            g_partySends.pop_front();
+        if (g_PartyChatterGlobalPerMinute > 0 && g_partySends.size() >= g_PartyChatterGlobalPerMinute)
+            return false;
+
+        const uint32_t key = group->GetGUID().GetCounter();
+        auto it = g_partyNextTalk.find(key);
+        if (it != g_partyNextTalk.end() && now < it->second)
+            return false;
+
+        g_partyNextTalk[key] = now + g_PartyChatterCompanySeconds;
+        g_partySends.push_back(now);
+        return true;
+    }
+
     bool ChooseDestination(Player* bot, const OllamaWorldSnapshot& world, bool guildTopic,
                            ChatChannelSourceLocal& outSource,
                            std::string& outChannelName,
@@ -66,7 +120,8 @@ namespace
         // audience, and this path had no check whatsoever -- a bot that
         // qualified for the tick because a guildmate was online could then
         // spend a generation talking to five other bots.
-        if (bot->GetGroup() && !g_DisableForParty && OllamaGroupHasRealPlayer(bot))
+        if (bot->GetGroup() && !g_DisableForParty &&
+            (OllamaGroupHasRealPlayer(bot) || (g_PartyChatterEnable && BotOnlyCompanyTogether(bot))))
         {
             outSource = SRC_PARTY_LOCAL;
             return true;
@@ -333,7 +388,13 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         const bool nearRealPlayer =
             world.RealPlayerWithin(bot, g_RandomChatterRealPlayerDistance);
 
-        if (!guildAudience && !nearRealPlayer)
+        // A company of bots on the road is an audience for itself. Everything a bot knows about its
+        // companions, and everything it will remember of an outing, has to start with somebody speaking --
+        // and until now nothing could, because every path required a person to be standing there. So a
+        // realm with nobody logged in produced no talk, no memories and no history at all (plans/31 §19).
+        const bool partyAudience = g_PartyChatterEnable && BotOnlyCompanyTogether(bot);
+
+        if (!guildAudience && !nearRealPlayer && !partyAudience)
             continue;
 
         // Schedule.
@@ -355,7 +416,18 @@ void OllamaBotRandomChatter::HandleRandomChatter()
             g_nextRandomChatTime[rawGuid] = now + urand(g_MinRandomInterval, g_MaxRandomInterval);
         };
 
-        if (urand(0, 99) >= g_RandomChatterBotCommentChance)
+        // A company talking among itself has its own chance and its own pacing: the ambient chance is
+        // tuned for a bot with a person in earshot, and a realm of companies talking all night at that
+        // rate is a great deal of inference spent where nobody is listening yet.
+        if (partyAudience && !nearRealPlayer && !guildAudience)
+        {
+            if (urand(0, 99) >= g_PartyChatterChance || !PartyTalkAllowed(bot, now))
+            {
+                reschedule();
+                continue;
+            }
+        }
+        else if (urand(0, 99) >= g_RandomChatterBotCommentChance)
         {
             reschedule();
             continue;

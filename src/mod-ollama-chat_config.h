@@ -80,6 +80,10 @@ extern bool        g_DisableRepliesInCombat;   // legacy; only the default for g
 extern bool        g_CombatReplies;            // answer someone who speaks to you mid-fight
 extern bool        g_CombatEvents;             // react to what just happened mid-fight
 extern bool        g_CombatAmbient;            // muse aloud mid-fight
+extern bool        g_PartyChatterEnable;             // a bot-only company may talk among itself
+extern uint32_t    g_PartyChatterChance;
+extern uint32_t    g_PartyChatterGlobalPerMinute;    // realm-wide cap on that talk
+extern uint32_t    g_PartyChatterCompanySeconds;     // per-company cooldown
 extern bool        g_EnableRandomChatter;
 extern bool        g_EnableEventChatter;
 extern bool        g_EnableRPPersonalities;

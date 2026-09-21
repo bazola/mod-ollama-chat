@@ -1666,7 +1666,13 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                                     break;
                                 }
                             }
-                            if (!hasRealPlayerInGroup)
+                            // A company of bots is its own audience (plans/31 §19). This is the THIRD
+                            // place that asked for a person in the group -- after canSendMessage below
+                            // and RouteMessage in dispatch.cpp -- and the earliest, so it silently
+                            // emptied the candidate pool before any reply chance was rolled: a
+                            // companion's turn obliged an answer that nobody was ever eligible to give.
+                            if (!hasRealPlayerInGroup &&
+                                !(g_PartyChatterEnable && group->GetMembersCount() >= 2))
                                 continue; // Skip bot - no real players in group
                         }
                     }

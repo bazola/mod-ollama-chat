@@ -463,17 +463,25 @@ namespace
                     return false;
                 return botAI->SayToGuild(c.text);
 
+            // A company of bots is its own audience (plans/31 §19). The re-check above exists because an
+            // LLM round trip is seconds long and the audience can leave inside it -- but it carried the
+            // old assumption that a party is only worth speaking to when a person is in it. `c41e12e`
+            // fixed that assumption in the reply path (`handler.cpp`) and never here, so every line a
+            // bot-only company generated was thrown away at the last mile: 5 submitted, 0 delivered, and
+            // no counter moved, because this return is the one drop in Deliver that tallies nothing.
             case SRC_PARTY_LOCAL:
                 if (g_DisableForParty || !bot->GetGroup())
                     return false;
-                if (!OllamaGroupHasRealPlayer(bot))
+                if (!OllamaGroupHasRealPlayer(bot) &&
+                    !(g_PartyChatterEnable && bot->GetGroup()->GetMembersCount() >= 2))
                     return false;
                 return botAI->SayToParty(c.text);
 
             case SRC_RAID_LOCAL:
                 if (g_DisableForParty || !bot->GetGroup())
                     return false;
-                if (!OllamaGroupHasRealPlayer(bot))
+                if (!OllamaGroupHasRealPlayer(bot) &&
+                    !(g_PartyChatterEnable && bot->GetGroup()->GetMembersCount() >= 2))
                     return false;
                 return botAI->SayToRaid(c.text);
 

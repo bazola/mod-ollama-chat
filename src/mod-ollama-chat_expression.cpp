@@ -733,7 +733,7 @@ void ChatOnEmote::OnPlayerTextEmote(Player* player, uint32 textEmote,
     if (!botAI || !botAI->IsBotAI())
         return;
 
-    if (g_DisableRepliesInCombat && bot->IsInCombat())
+    if (!g_CombatReplies && bot->IsInCombat())
         return;
 
     if (player->GetMapId() != bot->GetMapId())

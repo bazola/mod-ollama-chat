@@ -320,7 +320,9 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         if (!ai || !ai->IsBotAI())
             continue;
 
-        if (g_DisableRepliesInCombat && bot->IsInCombat())
+        // Idle chatter in a fight is the one kind that genuinely should not happen: nobody muses about the
+        // price of grain while something is biting them.
+        if (!g_CombatAmbient && bot->IsInCombat())
             continue;
 
         const uint64_t rawGuid = bot->GetGUID().GetRawValue();

@@ -76,7 +76,10 @@ extern uint32_t    g_MaxConcurrentQueries;
 // Feature Toggles & Core Settings
 // --------------------------------------------
 extern bool        g_Enable;
-extern bool        g_DisableRepliesInCombat;
+extern bool        g_DisableRepliesInCombat;   // legacy; only the default for g_CombatAmbient now
+extern bool        g_CombatReplies;            // answer someone who speaks to you mid-fight
+extern bool        g_CombatEvents;             // react to what just happened mid-fight
+extern bool        g_CombatAmbient;            // muse aloud mid-fight
 extern bool        g_EnableRandomChatter;
 extern bool        g_EnableEventChatter;
 extern bool        g_EnableRPPersonalities;
@@ -357,6 +360,8 @@ extern std::string g_EmoteReactionPromptTemplate;
 // --------------------------------------------
 extern bool        g_MemoryEnable;
 extern uint32_t    g_MemoryHistoryTokenLimit;   // condense once history exceeds this
+extern uint32_t    g_MemoryHistoryKeep;         // turns kept for the condenser, beyond what the prompt shows
+extern uint32_t    g_SnapshotTheirTasks;        // errands of the person spoken to, named to their companions
 extern uint32_t    g_MemoryPromptTokenBudget;   // how much of the prompt memories may use
 extern uint32_t    g_MemoryMaxPerBot;
 extern uint32_t    g_MemorySaveInterval;        // minutes
@@ -373,6 +378,7 @@ extern bool        g_RegardEnable;
 extern uint32_t    g_RegardRefreshSeconds;
 extern uint32_t    g_RegardMaxPerPrompt;
 extern float       g_RegardMinStrength;
+extern uint32_t    g_RegardPassedPerPrompt;   // moments from regard_log named per pair, newest first
 // Company words (plan 14 B3): a company's standing and who holds the bot's land, from guild_words /
 // land_words. Replies always carry them; ambient chatter only by chance, or when the topic is the guild.
 extern bool        g_RegardCompanyWords;
@@ -449,6 +455,7 @@ extern std::string g_GuildEventTypeGuildLogin;
 extern std::string g_GuildEventTypeGuildAchievement;
 
 // Chance variables for normal events
+extern int g_EventTypeDefeatedBoss_Chance;
 extern int g_EventTypeDefeated_Chance;
 extern int g_EventTypeDefeatedPlayer_Chance;
 extern int g_EventTypePetDefeated_Chance;
@@ -510,6 +517,7 @@ extern OllamaRAGSystem* g_RAGSystem;                     // Global RAG system in
 // These control the event type string sent to eventChatter for world event prompts.
 // Values are loaded from conf (see mod_ollama_chat.conf.dist)
 // --------------------------------------------
+extern std::string g_EventTypeDefeatedBoss;       // a master of the place, not another beast
 extern std::string g_EventTypeDefeated;           // "defeated"
 extern std::string g_EventTypeDefeatedPlayer;     // "defeated player"
 extern std::string g_EventTypePetDefeated;        // "pet defeated"

@@ -75,7 +75,10 @@ uint32_t    g_MaxConcurrentQueries = 0;
 // Feature Toggles & Core Settings
 // --------------------------------------------
 bool        g_Enable                          = true;
-bool        g_DisableRepliesInCombat          = true;
+bool        g_DisableRepliesInCombat          = true;   // legacy; now only the default for CombatAmbient
+bool        g_CombatReplies                   = true;
+bool        g_CombatEvents                    = true;
+bool        g_CombatAmbient                   = false;
 bool        g_EnableRandomChatter             = true;
 bool        g_EnableEventChatter              = true;
 bool        g_EnableRPPersonalities           = false;
@@ -221,6 +224,8 @@ std::string g_EmoteReactionPromptTemplate;
 // --------------------------------------------
 bool        g_MemoryEnable             = true;
 uint32_t    g_MemoryHistoryTokenLimit  = 1500;
+uint32_t    g_MemoryHistoryKeep        = 40;
+uint32_t    g_SnapshotTheirTasks       = 3;
 uint32_t    g_MemoryPromptTokenBudget  = 400;
 uint32_t    g_MemoryMaxPerBot          = 40;
 uint32_t    g_MemorySaveInterval       = 10;
@@ -234,6 +239,7 @@ bool        g_RegardEnable                  = false;
 uint32_t    g_RegardRefreshSeconds          = 60;
 uint32_t    g_RegardMaxPerPrompt            = 3;
 float       g_RegardMinStrength             = 10.0f;
+uint32_t    g_RegardPassedPerPrompt         = 4;
 bool        g_SkipMasterCommands            = true;
 bool        g_RegardCompanyWords            = false;
 uint32_t    g_RegardCompanyChance           = 35;
@@ -397,6 +403,7 @@ std::string g_GuildEventTypeGuildAchievement = "";
 // --------------------------------------------
 // Event Chatter Templates
 // --------------------------------------------
+std::string g_EventTypeDefeatedBoss;       // a master of the place, not another beast
 std::string g_EventTypeDefeated;           // "defeated"
 std::string g_EventTypeDefeatedPlayer;     // "defeated player"
 std::string g_EventTypePetDefeated;        // "pet defeated"
@@ -412,6 +419,7 @@ std::string g_EventTypeAchievement;        // "earned achievement"
 std::string g_EventTypeUsedObject;         // "used object"
 
 // Chance variables for normal events
+int g_EventTypeDefeatedBoss_Chance = 0;
 int g_EventTypeDefeated_Chance = 0;
 int g_EventTypeDefeatedPlayer_Chance = 0;
 int g_EventTypePetDefeated_Chance = 0;
@@ -572,6 +580,13 @@ void LoadOllamaChatConfig()
 
     g_Enable                          = sConfigMgr->GetOption<bool>("OllamaChat.Enable", true);
     g_DisableRepliesInCombat          = sConfigMgr->GetOption<bool>("OllamaChat.DisableRepliesInCombat", true);
+    // One switch used to silence replies, events AND ambient chatter for the whole of every fight, which
+    // is when nearly everything worth saying happens (plans/30 §3). Three, because they are three
+    // different things: answering someone, reacting to what just happened, and musing aloud.
+    g_CombatReplies                   = sConfigMgr->GetOption<bool>("OllamaChat.Combat.Replies", true);
+    g_CombatEvents                    = sConfigMgr->GetOption<bool>("OllamaChat.Combat.Events", true);
+    g_CombatAmbient                   = sConfigMgr->GetOption<bool>("OllamaChat.Combat.Ambient",
+                                                                    !g_DisableRepliesInCombat);
     g_EnableRandomChatter             = sConfigMgr->GetOption<bool>("OllamaChat.EnableRandomChatter", true);
     g_EnableEventChatter              = sConfigMgr->GetOption<bool>("OllamaChat.EnableEventChatter", true);
     g_EnableWhisperReplies            = sConfigMgr->GetOption<bool>("OllamaChat.EnableWhisperReplies", false);
@@ -672,6 +687,8 @@ void LoadOllamaChatConfig()
     // --- Long-term memory and relationships ------------------------------
     g_MemoryEnable                 = sConfigMgr->GetOption<bool>("OllamaChat.Memory.Enable", true);
     g_MemoryHistoryTokenLimit      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.HistoryTokenLimit", 1500);
+    g_MemoryHistoryKeep            = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.HistoryKeep", 40);
+    g_SnapshotTheirTasks           = sConfigMgr->GetOption<uint32_t>("OllamaChat.Snapshot.TheirTasks", 3);
     g_MemoryPromptTokenBudget      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.PromptTokenBudget", 400);
     g_MemoryMaxPerBot              = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.MaxPerBot", 40);
     g_MemorySaveInterval           = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.SaveInterval", 10);
@@ -700,6 +717,7 @@ void LoadOllamaChatConfig()
     g_RegardRefreshSeconds         = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.RefreshSeconds", 60);
     g_RegardMaxPerPrompt           = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.MaxPerPrompt", 3);
     g_RegardMinStrength            = sConfigMgr->GetOption<float>("OllamaChat.Regard.MinStrength", 10.0f);
+    g_RegardPassedPerPrompt        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.PassedPerPrompt", 4);
     g_RegardCompanyWords           = sConfigMgr->GetOption<bool>("OllamaChat.Regard.CompanyWords", false);
     g_RegardCompanyChance          = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.CompanyChance", 35));
     g_ChronicleRumours             = sConfigMgr->GetOption<bool>("OllamaChat.Chronicle.Rumours", false);
@@ -849,6 +867,7 @@ void LoadOllamaChatConfig()
     g_TypingSimulationDelayPerChar    = sConfigMgr->GetOption<uint32_t>("OllamaChat.TypingSimulationDelayPerChar", 250);
     g_TypingSimulationMaxDelay        = sConfigMgr->GetOption<uint32_t>("OllamaChat.TypingSimulationMaxDelay", 8000);
 
+    g_EventTypeDefeatedBoss       = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeDefeatedBoss", "");
     g_EventTypeDefeated           = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeDefeated", "");
     g_EventTypeDefeatedPlayer     = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeDefeatedPlayer", "");
     g_EventTypePetDefeated        = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypePetDefeated", "");
@@ -1180,6 +1199,7 @@ void LoadOllamaChatConfig()
     g_GuildEventTypeGuildDemotion = sConfigMgr->GetOption<std::string>("OllamaChat.GuildEventTypeGuildDemotion", "");
 
     // Load chance variables for normal events
+    g_EventTypeDefeatedBoss_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypeDefeatedBoss_Chance", 0);
     g_EventTypeDefeated_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypeDefeated_Chance", 0);
     g_EventTypeDefeatedPlayer_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypeDefeatedPlayer_Chance", 0);
     g_EventTypePetDefeated_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypePetDefeated_Chance", 0);
@@ -1284,7 +1304,7 @@ void LoadBotConversationHistoryFromDB()
 
         auto& playerHistory = g_BotConversationHistory[botGuid][playerGuid];
         playerHistory.push_back({ playerMsg, botReply, /*persisted*/ true });
-        while (playerHistory.size() > g_MaxConversationHistory)
+        while (playerHistory.size() > HistoryKeepDepth())
         {
             playerHistory.pop_front();
         }

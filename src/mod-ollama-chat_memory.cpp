@@ -123,11 +123,26 @@ namespace
         return out;
     }
 
+    // After condensing, drop what has been distilled but keep the turns the prompt still shows. Erasing the
+    // lot would make a bot go blank about the last thing said to it in the middle of a conversation --
+    // exactly the failure the condenser exists to cure, moved from between sessions to inside one.
     void ClearHistory(uint64_t botGuid)
     {
         {
             std::lock_guard<std::mutex> lock(g_ConversationHistoryMutex);
-            g_BotConversationHistory.erase(botGuid);
+            auto it = g_BotConversationHistory.find(botGuid);
+            if (it != g_BotConversationHistory.end())
+            {
+                for (auto& [playerGuid, turns] : it->second)
+                {
+                    while (turns.size() > g_MaxConversationHistory)
+                        turns.pop_front();
+                    // The DELETE below takes every row for this bot, so the turns we keep have to be
+                    // written again or a restart would lose them.
+                    for (BotConversationEntry& turn : turns)
+                        turn.persisted = false;
+                }
+            }
         }
 
         // The rows outlived the in-memory window until now, so every restart

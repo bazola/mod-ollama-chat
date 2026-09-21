@@ -75,6 +75,7 @@ namespace
     {
         // Ordinary events.
         if (type == g_EventTypeLearnedSpell)    return g_EventTypeLearnedSpell_Chance;
+        if (type == g_EventTypeDefeatedBoss)    return g_EventTypeDefeatedBoss_Chance;
         if (type == g_EventTypeDefeated)        return g_EventTypeDefeated_Chance;
         if (type == g_EventTypeDefeatedPlayer)  return g_EventTypeDefeatedPlayer_Chance;
         if (type == g_EventTypePetDefeated)     return g_EventTypePetDefeated_Chance;
@@ -109,6 +110,8 @@ namespace
     std::string MemoryLineFor(const std::string& actor, const std::string& type,
                               const std::string& detail)
     {
+        if (type == g_EventTypeDefeatedBoss)
+            return SafeFormat("{} brought down {}, the master of this place", actor, detail);
         if (type == g_EventTypeDefeated || type == g_EventTypePetDefeated)
             return SafeFormat("{} killed {}", actor, detail);
         if (type == g_EventTypeDefeatedPlayer)
@@ -235,7 +238,9 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
 
     for (Player* bot : candidateBots)
     {
-        if (g_DisableRepliesInCombat && bot->IsInCombat())
+        // Events are reactions to something that just happened, and in a fight that is when the most
+        // worth reacting to happens. This used to be gated with everything else.
+        if (!g_CombatEvents && bot->IsInCombat())
             continue;
 
         uint32_t botChance;
@@ -393,8 +398,18 @@ ChatOnKill::ChatOnKill()
 
 void ChatOnKill::OnPlayerCreatureKill(Player* killer, Creature* victim)
 {
-    if (killer && victim)
-        eventChatter.DispatchGameEvent(killer, g_EventTypeDefeated, victim->GetName());
+    if (!killer || !victim)
+        return;
+
+    // A boss going down is the largest thing that happens in a night's play, and it used to be dispatched
+    // as the same event as a boar: EventTypeDefeated at a 1% chance against 494,622 logged kills, so the
+    // party fell silent at the one moment worth speaking (plans/30 §3). Its own event, its own chance.
+    // rank 3 is a world boss, the same reading mod-ledger takes of creature_template.rank.
+    CreatureTemplate const* proto = victim->GetCreatureTemplate();
+    const bool master = victim->IsDungeonBoss() || (proto && proto->rank == 3);
+
+    eventChatter.DispatchGameEvent(killer, master ? g_EventTypeDefeatedBoss : g_EventTypeDefeated,
+                                   victim->GetName());
 }
 
 void ChatOnKill::OnPlayerPVPKill(Player* killer, Player* killed)

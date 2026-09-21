@@ -294,6 +294,10 @@ namespace
         std::string otherName;
         std::string description;    // one sentence in the bot's own words, may be empty
         std::string aside;          // regard_aside (plans/18 P3): e.g. a sponsor's mind to bring them in, may be empty
+        // What actually passed between the two of them, newest first, in regard.py's words ("slew Edwin
+        // VanCleef together", "they called you an orcish warlock, mocking your race"). The description
+        // above says what the bot feels; this says what happened. Only the second one can be brought up.
+        std::vector<std::string> passed;
     };
 
     // bot guid (counter) -> entries, strongest feeling first
@@ -302,6 +306,43 @@ namespace
     std::mutex                          g_RegardMutex;
     std::shared_ptr<const RegardTable>  g_RegardTable;
     std::atomic<bool>                   g_RegardLoading{ false };
+
+    // regard_log holds every moment regard.py scored, in words, per pair: it is the only record anywhere
+    // of what two people have actually been through together, and nothing has ever read it into a prompt.
+    // Loaded whole on the regard thread and attached to the pairs already kept, so a prompt costs no query.
+    void LoadPassedBetween(RegardTable& table)
+    {
+        if (g_RegardPassedPerPrompt == 0)
+            return;
+        if (!CharacterDatabase.Query("SELECT 1 FROM information_schema.tables "
+                                     "WHERE table_schema = DATABASE() AND table_name = 'regard_log'"))
+            return;
+
+        // Index the pairs we kept, so a log row for a pair below MinStrength costs nothing.
+        std::unordered_map<uint64_t, RegardEntry*> byPair;
+        for (auto& [botGuid, entries] : table)
+            for (RegardEntry& e : entries)
+                byPair[(uint64_t(botGuid) << 32) | e.otherGuid] = &e;
+
+        // Newest last so a plain push_back leaves each list newest-first after the reverse below.
+        QueryResult result = CharacterDatabase.Query(
+            "SELECT bot_guid, other_guid, reason FROM regard_log WHERE reason <> '' ORDER BY id DESC");
+        if (!result)
+            return;
+
+        do
+        {
+            Field* f = result->Fetch();
+            auto it = byPair.find((uint64_t(f[0].Get<uint32_t>()) << 32) | f[1].Get<uint32_t>());
+            if (it == byPair.end() || it->second->passed.size() >= g_RegardPassedPerPrompt)
+                continue;
+            std::string reason = f[2].Get<std::string>();
+            // regard.py scores the same exchange from both sides and repeats a standing reason as a pair
+            // goes on; the same sentence twice in a prompt reads as an obsession, not a memory.
+            if (std::find(it->second->passed.begin(), it->second->passed.end(), reason) == it->second->passed.end())
+                it->second->passed.push_back(std::move(reason));
+        } while (result->NextRow());
+    }
 
     void LoadRegardTable()
     {
@@ -334,9 +375,11 @@ namespace
                     Field* f = result->Fetch();
                     (*table)[f[0].Get<uint32_t>()].push_back({ f[1].Get<uint32_t>(), f[2].Get<float>(),
                                                                f[3].Get<std::string>(), f[4].Get<std::string>(),
-                                                               f[5].Get<std::string>() });
+                                                               f[5].Get<std::string>(), {} });
                 } while (result->NextRow());
             }
+
+            LoadPassedBetween(*table);
         }
 
         std::lock_guard<std::mutex> lock(g_RegardMutex);
@@ -556,7 +599,17 @@ std::string Regard_WordsFor(Player* bot, Player* other)
     const uint32_t otherGuid = other->GetGUID().GetCounter();
     for (RegardEntry const& e : it->second)
         if (e.otherGuid == otherGuid)
-            return "How you feel about " + RegardLine(e);
+        {
+            std::string out = "How you feel about " + RegardLine(e);
+            if (!e.passed.empty())
+            {
+                out += " What has passed between you, most recent first:";
+                for (std::string const& p : e.passed)
+                    out += " " + p + ";";
+                out.back() = '.';
+            }
+            return out;
+        }
 
     return "";
 }

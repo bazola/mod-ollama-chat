@@ -360,12 +360,24 @@ bool PlayerBotChatHandler::OnPlayerCanUseChat(Player* player, uint32_t type, uin
     return true;
 }
 
+// How many turns the deque holds. The prompt shows only the newest g_MaxConversationHistory of them; the
+// rest are kept for the condenser, which is the only thing that turns a conversation into something the bot
+// still knows tomorrow. They were one number, and it made long-term memory unreachable: the deque was
+// trimmed to 5 pairs, about 300 tokens, while Memory.HistoryTokenLimit waited for 1500 before condensing.
+// Seven days of play produced no condensed memory at all (plans/30 §4) -- every row in the table came from
+// the held-tongue path instead. Raising the one number would have put 40 turns of small talk into every
+// prompt, so they are two numbers now.
+uint32_t HistoryKeepDepth()
+{
+    return std::max<uint32_t>(g_MaxConversationHistory, g_MemoryEnable ? g_MemoryHistoryKeep : 0);
+}
+
 void AppendBotConversation(uint64_t botGuid, uint64_t playerGuid, const std::string& playerMessage, const std::string& botReply)
 {
     std::lock_guard<std::mutex> lock(g_ConversationHistoryMutex);
     auto& playerHistory = g_BotConversationHistory[botGuid][playerGuid];
     playerHistory.push_back({ playerMessage, botReply, /*persisted*/ false });
-    while (playerHistory.size() > g_MaxConversationHistory)
+    while (playerHistory.size() > HistoryKeepDepth())
     {
         playerHistory.pop_front();
     }
@@ -429,7 +441,7 @@ void SaveBotConversationHistoryToDB()
         return;
 
     // A configured 0 would run the trim below with OFFSET -1.
-    const uint32_t keep   = std::max<uint32_t>(g_MaxConversationHistory, 1);
+    const uint32_t keep   = std::max<uint32_t>(HistoryKeepDepth(), 1);
     const uint32_t offset = keep - 1;
 
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
@@ -687,11 +699,14 @@ std::string GetBotHistoryPrompt(uint64_t botGuid, uint64_t playerGuid, std::stri
 
     result += SafeFormat(g_ChatHistoryHeaderTemplate, fmt::arg("player_name", playerName));
 
-    for (const auto& entry : playerIt->second) {
+    // Only the newest turns go in the prompt, however deep the deque is kept for the condenser.
+    const auto& turns = playerIt->second;
+    size_t first = turns.size() > g_MaxConversationHistory ? turns.size() - g_MaxConversationHistory : 0;
+    for (auto entry = turns.begin() + first; entry != turns.end(); ++entry) {
         result += SafeFormat(g_ChatHistoryLineTemplate,
             fmt::arg("player_name", playerName),
-            fmt::arg("player_message", entry.playerMessage),
-            fmt::arg("bot_reply", entry.botReply)
+            fmt::arg("player_message", entry->playerMessage),
+            fmt::arg("bot_reply", entry->botReply)
         );
     }
 
@@ -1121,6 +1136,72 @@ std::string ChatHandler_GetCombatSummary(Player* bot)
     return oss.str();
 }
 
+
+// What the bot can see of the person it is talking to. The snapshot beside this one describes the bot's
+// own fight, its own errands and its own spells, and nothing anywhere described the other person at all --
+// so bots never once remarked on what the player was doing. Measured over seven days of play: one bot line
+// in 758 mentioned a task, and 3.8% said anything about a fight in progress (plans/30 §3).
+//
+// Only what someone standing there would know. Their wounds and their fight are plain to see; their errands
+// are not, so those are named only for people in the same company, who in this world would have been told.
+std::string ChatHandler_DescribeTheirDoings(Player* bot, Player* about)
+{
+    if (!bot || !about || bot == about || !SnapshotInWords())
+        return "";
+
+    const bool together = bot->GetGroup() && bot->GetGroup() == about->GetGroup();
+    std::string out;
+
+    if (about->IsInCombat())
+    {
+        Unit* victim = about->GetVictim();
+        out += about->GetName() + " is fighting" + (victim ? " " + std::string(victim->GetName()) : "")
+            +  " and is " + Roleplay_DescribeHealth(about->GetHealth(), about->GetMaxHealth()) + ".";
+    }
+    else
+    {
+        out += about->GetName() + " is not fighting just now";
+        const std::string hurt = Roleplay_DescribeHealth(about->GetHealth(), about->GetMaxHealth());
+        // Only worth saying when it is not the dull answer.
+        if (about->GetHealth() * 4 < about->GetMaxHealth() * 3)
+            out += ", and is " + hurt;
+        out += ".";
+    }
+
+    if (!together)
+        return "\n" + out + "\n";
+
+    std::vector<std::string> tasks;
+    for (auto const& [questId, qsd] : about->getQuestStatusMap())
+    {
+        if (qsd.Status != QUEST_STATUS_INCOMPLETE && qsd.Status != QUEST_STATUS_COMPLETE)
+            continue;
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
+        if (!quest)
+            continue;
+        std::string title = quest->GetTitle();
+        if (auto const* locale = sObjectMgr->GetQuestLocale(questId))
+        {
+            int locIdx = about->GetSession() ? about->GetSession()->GetSessionDbLocaleIndex() : -1;
+            if (locIdx >= 0)
+                ObjectMgr::GetLocaleString(locale->Title, locIdx, title);
+        }
+        tasks.push_back("\"" + title + "\""
+                        + (qsd.Status == QUEST_STATUS_COMPLETE ? " (done, not yet reported)" : ""));
+        if (tasks.size() >= g_SnapshotTheirTasks)
+            break;
+    }
+
+    if (!tasks.empty())
+    {
+        out += " What they are seeing to, and you with them:";
+        for (std::string const& t : tasks)
+            out += " " + t + ";";
+        out.back() = '.';
+    }
+
+    return "\n" + out + "\n";
+}
 
 std::string GenerateBotGameStateSnapshot(Player* bot)
 {
@@ -1699,7 +1780,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         if (!candidateBots.empty())
         {
             Player* whisperBot = candidateBots[0]; // Should only be one bot for whispers
-            if (!(g_DisableRepliesInCombat && whisperBot->IsInCombat()))
+            if (!(!g_CombatReplies && whisperBot->IsInCombat()))
             {
                 finalCandidates.push_back(whisperBot);
                 if(g_DebugEnabled)
@@ -1725,7 +1806,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             {
                 continue;
             }
-            if (g_DisableRepliesInCombat && bot->IsInCombat())
+            if (!g_CombatReplies && bot->IsInCombat())
             {
                 continue;
             }
@@ -1756,7 +1837,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             std::sort(mentionedBots.begin(), mentionedBots.end(),
                       [](const std::pair<size_t, Player*> &a, const std::pair<size_t, Player*> &b) { return a.first < b.first; });
             Player* chosen = mentionedBots.front().second;
-            if (!(g_DisableRepliesInCombat && chosen->IsInCombat()))
+            if (!(!g_CombatReplies && chosen->IsInCombat()))
             {
                 finalCandidates.push_back(chosen);
 
@@ -1779,7 +1860,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         {
             for (Player* bot : candidateBots)
             {
-                if (g_DisableRepliesInCombat && bot->IsInCombat())
+                if (!g_CombatReplies && bot->IsInCombat())
                 {
                     if(g_DebugEnabled)
                     {
@@ -1833,7 +1914,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             LOG_INFO("module.ollamachat", "[Ollama Chat] No eligible bots found to respond to message '{}'. "
                     "Source: {}, Eligible bots: {}, Candidate bots: {}, Combat disabled: {}",
                     msg, ChatChannelSourceLocalStr[sourceLocal], eligibleBots.size(), 
-                    candidateBots.size(), g_DisableRepliesInCombat);
+                    candidateBots.size(), !g_CombatReplies);
         }
         return;
     }
@@ -2301,6 +2382,7 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     if(g_EnableChatBotSnapshotTemplate)
     {
         prompt += GenerateBotGameStateSnapshot(bot);
+        prompt += ChatHandler_DescribeTheirDoings(bot, player);
     }
 
     // What this bot remembers, and how it feels about people. Bounded by

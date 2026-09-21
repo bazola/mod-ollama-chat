@@ -498,6 +498,42 @@ namespace
         }
     }
 
+    // Is `thought` just `said` handed back? Compared on words rather than characters so that punctuation,
+    // case and a dropped article do not hide it.
+    bool IsEcho(const std::string& thought, const std::string& said)
+    {
+        auto words = [](const std::string& v)
+        {
+            std::vector<std::string> out;
+            std::string cur;
+            for (char c : v)
+            {
+                if (std::isalnum(static_cast<unsigned char>(c)))
+                    cur += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                else if (!cur.empty())
+                {
+                    out.push_back(cur);
+                    cur.clear();
+                }
+            }
+            if (!cur.empty())
+                out.push_back(cur);
+            return out;
+        };
+
+        const std::vector<std::string> a = words(thought);
+        const std::vector<std::string> b = words(said);
+        if (a.size() < 4 || b.empty())
+            return false;
+
+        size_t shared = 0;
+        for (const std::string& w : a)
+            if (std::find(b.begin(), b.end(), w) != b.end())
+                ++shared;
+
+        return shared * 4 >= a.size() * 3;      // three quarters of it came from them
+    }
+
     // A held tongue, world-thread half. Reads {"thought": "...", "weight": N}
     // and does two things with it: the bot remembers the thought, and if it
     // weighed heavily enough, the room sees that something was withheld.
@@ -552,13 +588,26 @@ namespace
         if (thought.empty())
             return;
 
-        // Remembered either way. This is the half the player never sees, and
-        // the one that gives a swallowed line an effect on the world: it sorts
-        // by importance into the bot's prompt and colours what it says later.
-        // Remembered either way. There is no calibrated number any more, just
-        // two levels: what mattered outranks what did not when
-        // Memory_BuildPromptSection has to fit its token budget.
-        Memory_Remember(h.botGuid, thought, mattered ? 7 : 3);
+        // Only what mattered is kept. This path was writing every swallowed half-thought into the same
+        // store the bot reads back as things it knows, and because condensation could never run
+        // (plans/30 §4) it was the ONLY thing in there: 41 of the 48 memories on the realm after seven
+        // days of play were "I kept my doubts to myself" or "I did not share my thoughts on the matter".
+        // A bot whose whole remembered life is a list of times it said nothing has been taught to say
+        // nothing. The ones that mattered are worth keeping; the rest were never worth a row.
+        if (!mattered)
+            return;
+
+        // And never keep a parrot. Asked what it swallowed, a model will sometimes answer by repeating the
+        // line that prompted the question, and that sentence then sits in the bot's memory until it says it
+        // back to the person who said it first. Traced on 2026-09-20: <the player> said "The silence is
+        // temporary, the sounds of battle will ring out too"; Bazola stored it verbatim at 15:23:30 and
+        // said it back to him at 15:47:47, then again eight seconds later.
+        if (IsEcho(thought, h.message))
+            return;
+
+        // This is the half the player never sees, and the one that gives a swallowed line an effect on the
+        // world: it sorts into the bot's prompt and colours what it says later.
+        Memory_Remember(h.botGuid, thought, 7);
 
         if (!mattered || g_HeldTongueEmote.empty())
             return;

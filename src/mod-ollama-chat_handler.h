@@ -37,6 +37,7 @@ void ProcessBotChatMessage(Player* bot, const std::string& msg,
 
 void SaveBotConversationHistoryToDB();
 void DeleteBotConversationHistoryFromDB(uint64_t botGuid);
+uint32_t HistoryKeepDepth();
 void AppendBotConversation(uint64_t botGuid, uint64_t playerGuid,
                            const std::string& playerMessage, const std::string& botReply);
 
@@ -59,6 +60,7 @@ bool OllamaSubmitBotReply(Player* bot, Player* sender, const std::string& msg,
 
 // Bounded, distance-sorted snapshot helpers used by the prompt builders and
 // the topic engine.
+std::string ChatHandler_DescribeTheirDoings(Player* bot, Player* about);
 std::string GenerateBotGameStateSnapshot(Player* bot);
 
 class PlayerBotChatHandler : public PlayerScript

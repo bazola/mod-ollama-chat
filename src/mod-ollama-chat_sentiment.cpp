@@ -324,9 +324,13 @@ namespace
             for (RegardEntry& e : entries)
                 byPair[(uint64_t(botGuid) << 32) | e.otherGuid] = &e;
 
-        // Newest last so a plain push_back leaves each list newest-first after the reverse below.
-        QueryResult result = CharacterDatabase.Query(
-            "SELECT bot_guid, other_guid, reason FROM regard_log WHERE reason <> '' ORDER BY id DESC");
+        // Newest first, and only recent moments: regard_log is append-only and never pruned, and this runs
+        // every RefreshSeconds. A pair fills up after PassedPerPrompt rows and the rest are skipped, but the
+        // scan itself would grow without bound. Old moments are the wrong ones to name anyway — the feeling
+        // they caused has already decayed into the score.
+        QueryResult result = CharacterDatabase.Query(SafeFormat(
+            "SELECT bot_guid, other_guid, reason FROM regard_log "
+            "WHERE reason <> '' AND ts > NOW() - INTERVAL {} DAY ORDER BY id DESC", g_RegardPassedDays));
         if (!result)
             return;
 

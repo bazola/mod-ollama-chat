@@ -240,6 +240,7 @@ uint32_t    g_RegardRefreshSeconds          = 60;
 uint32_t    g_RegardMaxPerPrompt            = 3;
 float       g_RegardMinStrength             = 10.0f;
 uint32_t    g_RegardPassedPerPrompt         = 4;
+uint32_t    g_RegardPassedDays              = 30;
 bool        g_SkipMasterCommands            = true;
 bool        g_RegardCompanyWords            = false;
 uint32_t    g_RegardCompanyChance           = 35;
@@ -718,6 +719,7 @@ void LoadOllamaChatConfig()
     g_RegardMaxPerPrompt           = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.MaxPerPrompt", 3);
     g_RegardMinStrength            = sConfigMgr->GetOption<float>("OllamaChat.Regard.MinStrength", 10.0f);
     g_RegardPassedPerPrompt        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.PassedPerPrompt", 4);
+    g_RegardPassedDays             = sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.PassedDays", 30);
     g_RegardCompanyWords           = sConfigMgr->GetOption<bool>("OllamaChat.Regard.CompanyWords", false);
     g_RegardCompanyChance          = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Regard.CompanyChance", 35));
     g_ChronicleRumours             = sConfigMgr->GetOption<bool>("OllamaChat.Chronicle.Rumours", false);

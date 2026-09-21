@@ -379,6 +379,7 @@ extern uint32_t    g_RegardRefreshSeconds;
 extern uint32_t    g_RegardMaxPerPrompt;
 extern float       g_RegardMinStrength;
 extern uint32_t    g_RegardPassedPerPrompt;   // moments from regard_log named per pair, newest first
+extern uint32_t    g_RegardPassedDays;        // how far back that scan reaches
 // Company words (plan 14 B3): a company's standing and who holds the bot's land, from guild_words /
 // land_words. Replies always carry them; ambient chatter only by chance, or when the topic is the guild.
 extern bool        g_RegardCompanyWords;

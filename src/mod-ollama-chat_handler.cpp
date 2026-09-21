@@ -126,8 +126,19 @@ static bool OllamaIsDirectAddress(Player* bot, Player* speaker, ChatChannelSourc
     if (OllamaFindBotNameMention(msg, bot->GetName()) != std::string::npos)
         return true;
 
-    if (senderIsBot)
-        return false;   // only a person's turn obliges an answer
+    // A companion's turn obliges an answer too, in a company with nobody real in it. Otherwise everything
+    // below is skipped for a bot speaker and a company falls under crowd pacing: three quarters of what is
+    // said draws no reply (BotReplyChance.Party 25), and a bot that has spoken cannot speak again for
+    // PerBotSeconds — so a party of two could not hold a conversation at all. The rule right below this
+    // already says a small party is a conversation and not a crowd; it only ever applied when the speaker
+    // was a person (plans/31 §19).
+    const bool companionTurn = senderIsBot && g_PartyChatterEnable &&
+                               (source == SRC_PARTY_LOCAL || source == SRC_RAID_LOCAL) &&
+                               speaker && bot->GetGroup() && bot->GetGroup() == speaker->GetGroup() &&
+                               !OllamaGroupHasRealPlayer(bot);
+
+    if (senderIsBot && !companionTurn)
+        return false;   // only a turn from someone you are with obliges an answer
 
     // Already talking to this person here.
     if (speaker && Governor_InConversation(bot->GetGUID(), speaker->GetGUID(), scopeKey))

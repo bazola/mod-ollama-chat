@@ -355,8 +355,15 @@ void OllamaBotRandomChatter::HandleRandomChatter()
     OllamaWorldSnapshot world;
     world.Build();
 
-    if (world.Empty())
-        return;   // nobody to talk to; do not burn LLM calls on an empty world
+    // A realm with nobody logged in is still full of people. This guard is upstream's and it predates
+    // plans/31 §19, which taught a company of bots to be an audience for itself -- but it sits ABOVE every
+    // gate that work fixed, so on an empty realm none of them was ever reached and the first overnight run
+    // produced not one line. That is precisely the night the feature was built for.
+    //
+    // With party chatter off the early-out still stands: then an empty world really does mean nobody to
+    // talk to, and the walk below is pure waste.
+    if (world.Empty() && !g_PartyChatterEnable)
+        return;
 
     auto const& allPlayers = ObjectAccessor::GetPlayers();
 

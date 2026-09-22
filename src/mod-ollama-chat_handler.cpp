@@ -13,6 +13,7 @@
 #include "World.h"
 #include "AiFactory.h"
 #include "ChannelMgr.h"
+#include "DBCStores.h"
 #include <sstream>
 #include <vector>
 #include <list>
@@ -2350,6 +2351,15 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     uint32_t playerGold             = player->GetMoney() / 10000;
     float playerDistance            = player->IsInWorld() && bot->IsInWorld() ? player->GetDistance(bot) : -1.0f;
 
+    // Where THEY are standing. The bot's own whereabouts have always been in the prompt and the
+    // player's never were (plan 25 item 60), so a bot could not answer "where are you?" or take in
+    // that you are somewhere else entirely. Their area/zone comes from the DBC store rather than a
+    // PlayerbotAI, which a real player does not have. The bot's own helper only formats the entry.
+    AreaTableEntry const* playerArea = sAreaTableStore.LookupEntry(player->GetAreaId());
+    AreaTableEntry const* playerZone = sAreaTableStore.LookupEntry(player->GetZoneId());
+    std::string playerAreaName      = playerArea ? PlayerbotAI::GetLocalizedAreaName(playerArea) : "UnknownArea";
+    std::string playerZoneName      = playerZone ? PlayerbotAI::GetLocalizedAreaName(playerZone) : "UnknownZone";
+
     std::string chatHistory         = GetBotHistoryPrompt(botGuid, playerGuid, playerMessage);
     // Local patch (plan 14): regard replaces the module's own sentiment score when enabled.
     std::string sentimentInfo       = g_RegardEnable ? Regard_WordsFor(bot, player) : GetSentimentPromptAddition(bot, player);
@@ -2390,7 +2400,9 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
         fmt::arg("player_distance", playerDistance),
         fmt::arg("bot_area", botAreaName),
         fmt::arg("bot_zone", botZoneName),
-        fmt::arg("bot_map", botMapName)
+        fmt::arg("bot_map", botMapName),
+        fmt::arg("player_area", playerAreaName),
+        fmt::arg("player_zone", playerZoneName)
     );
     
     std::string prompt = SafeFormat(

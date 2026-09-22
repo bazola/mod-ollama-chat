@@ -1457,18 +1457,32 @@ void OllamaChat_DispatchEmoteReaction(Player* bot, Player* player, uint32_t text
     if (!bot || !player)
         return;
 
+    // This was the one producer in the module that never learned the party rule: it set SRC_SAY_LOCAL
+    // unconditionally, so a bot answered a companion's gesture out loud to the room instead of to the
+    // party (plan 38 §7). Ambient returns SRC_PARTY_LOCAL early and event chatter chooses on
+    // partyAudience; this now makes the same choice they do.
+    const bool partyAudience = bot->GetGroup() && !g_DisableForParty && OllamaGroupHasRealPlayer(bot);
+
     OllamaChatRequest request;
     request.botGuid    = bot->GetGUID().GetRawValue();
     request.targetGuid = player->GetGUID().GetRawValue();
-    request.source     = SRC_SAY_LOCAL;
+    request.source     = partyAudience ? SRC_PARTY_LOCAL : SRC_SAY_LOCAL;
     request.chainDepth = 0;
     request.botName    = bot->GetName();
     request.kind       = OllamaRequestKind::EventChatter;
-    request.scopeKey   = Governor_MakeScopeKey("Say", 0, "", 0, bot->GetZoneId());
+    // Party lines key on the GROUP, exactly as they do in ProcessChat and in event chatter -- keying
+    // them on the zone puts the reply in a different conversation space from the party chat it was
+    // said in, so it counts for no cooldown, no repetition history and no thread.
+    request.scopeKey   = partyAudience && bot->GetGroup()
+                             ? Governor_MakeScopeKey("Party", 0, "", 0, bot->GetGroup()->GetGUID().GetCounter())
+                             : Governor_MakeScopeKey("Say", 0, "", 0, bot->GetZoneId());
     request.triggerBotReplies = false;
     // Someone emoted at this bot by name. Its own debounce paces this;
     // the ambient say cooldown has no business also silencing it.
     request.directAddress = true;
+    // The reply is addressed to a person, so it belongs in the history that condensation reads.
+    // Without this the whole emote path was invisible to memory (plan 38 §2.2).
+    request.recordHistory = true;
 
     uint32_t maxWords = 0;
     request.prompt = BuildEmoteReactionPrompt(bot, player, textEmote, &maxWords);

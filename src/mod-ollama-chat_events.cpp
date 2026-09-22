@@ -489,6 +489,21 @@ void ChatOnKill::OnPlayerCreatureKill(Player* killer, Creature* victim)
     CreatureTemplate const* proto = victim->GetCreatureTemplate();
     const bool master = victim->IsDungeonBoss() || (proto && proto->rank == 3);
 
+    // A floor under the ordinary kill (plan 25 item 33). Nobody remarks on stepping on a chicken, and
+    // nobody remarks on a wolf that a veteran killed without breaking stride. Bosses are exempt: a master
+    // of the place is worth saying regardless of how easily it fell. This gate sits ahead of
+    // DispatchGameEvent deliberately, because the witnessed-event memory is seeded there BEFORE any
+    // chance roll -- so flooring only the roll would still broadcast "X slew Chicken" to every bot nearby.
+    if (!master)
+    {
+        if (victim->IsCritter())
+            return;
+
+        const int gap = int(killer->GetLevel()) - int(victim->GetLevel());
+        if (g_EventDefeatedTrivialLevelGap > 0 && gap >= g_EventDefeatedTrivialLevelGap)
+            return;
+    }
+
     eventChatter.DispatchGameEvent(killer, master ? g_EventTypeDefeatedBoss : g_EventTypeDefeated,
                                    victim->GetName());
 }

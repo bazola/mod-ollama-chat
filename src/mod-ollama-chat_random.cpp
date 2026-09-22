@@ -519,6 +519,10 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         OllamaChatRequest request;
         request.botGuid     = rawGuid;
         request.targetGuid  = initiateGuid;   // 0 = said to the room, as before
+        // When the bot opens with a line aimed at someone, that line is half an exchange and belongs in
+        // history; only their reply and its answer were being kept, so a bot's own opener could never be
+        // condensed into a memory (plan 38 P5). A line said to the room has no one to record it against.
+        request.recordHistory = initiateGuid != 0;
         request.source      = source;
         request.channelName = channelName;
         request.channelId   = channelId;

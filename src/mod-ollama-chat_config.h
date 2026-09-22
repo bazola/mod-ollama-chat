@@ -474,6 +474,8 @@ extern std::string g_GuildEventTypeGuildAchievement;
 // Chance variables for normal events
 extern int g_EventTypeDefeatedBoss_Chance;
 extern int g_EventTypeDefeated_Chance;
+// Levels the killer must be above the victim before an ordinary kill stops being worth a word. 0 = no floor.
+extern int g_EventDefeatedTrivialLevelGap;
 extern int g_EventTypeDefeatedPlayer_Chance;
 extern int g_EventTypePetDefeated_Chance;
 extern int g_EventTypeGotItem_Chance;

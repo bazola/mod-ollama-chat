@@ -434,6 +434,7 @@ std::string g_EventTypeUsedObject;         // "used object"
 // Chance variables for normal events
 int g_EventTypeDefeatedBoss_Chance = 0;
 int g_EventTypeDefeated_Chance = 0;
+int g_EventDefeatedTrivialLevelGap = 8;
 int g_EventTypeDefeatedPlayer_Chance = 0;
 int g_EventTypePetDefeated_Chance = 0;
 int g_EventTypeGotItem_Chance = 0;
@@ -1242,6 +1243,7 @@ void LoadOllamaChatConfig()
     g_GuildEventTypeGuildDemotion = sConfigMgr->GetOption<std::string>("OllamaChat.GuildEventTypeGuildDemotion", "");
 
     // Load chance variables for normal events
+    g_EventDefeatedTrivialLevelGap = sConfigMgr->GetOption<int>("OllamaChat.EventDefeatedTrivialLevelGap", 8);
     g_EventTypeDefeatedBoss_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypeDefeatedBoss_Chance", 0);
     g_EventTypeDefeated_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypeDefeated_Chance", 0);
     g_EventTypeDefeatedPlayer_Chance = sConfigMgr->GetOption<int>("OllamaChat.EventTypeDefeatedPlayer_Chance", 0);

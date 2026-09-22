@@ -744,7 +744,8 @@ void LoadOllamaChatConfig()
             "who stood with you, what fell, and what it cost or won. One per line. Prefix each with an "
             "importance from 1 to 10 and a pipe, like \"7 | ...\". Name the place and name the people. "
             "Write them in the third person as short factual notes, at most 25 words each, in the terms of "
-            "the world itself: no games, levels, specs or players. If nothing is worth keeping, write nothing.";
+            "the world itself: no games, levels, specs or players. Write only about what happened and who "
+            "was there; never about who was absent. If nothing is worth keeping, write nothing.";
     }
 
     g_RelationshipEnable           = sConfigMgr->GetOption<bool>("OllamaChat.Relationship.Enable", true);
@@ -1364,6 +1365,7 @@ void OllamaChatConfigWorldScript::OnStartup()
     Roleplay_Load();
     Memory_Load();
     Memory_LoadHouseholds();
+    Memory_LoadCompanions();
 
     // Spread the three periodic saves so they do not all come due on the same
     // world tick. Each is incremental now, but they queue onto one database

@@ -106,6 +106,19 @@ void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line);
 // called from the module's maintenance tick.
 void Memory_FlushStaleEvents();
 
+// Who keeps deed memories at all (plan 38).
+//
+// Fleet-wide, every bot digesting its own deeds cost ~20 model calls a minute
+// and filled the store with weather: 892 memories in thirteen minutes, 77% of
+// which named no place. Only a bot that has stood in a company with a real
+// person keeps them -- and once marked it keeps them for the nights it spends
+// out alone too, which is the whole value of having a companion with a life.
+//
+// Load at startup; note one the moment it is seen grouped with a person.
+void Memory_LoadCompanions();
+void Memory_NoteCompanion(uint64_t botGuid);
+bool Memory_IsCompanion(uint64_t botGuid);
+
 // Prompt fragments. World thread only.
 //
 // `about` may be null; when set, that person's relationship line is listed

@@ -181,6 +181,11 @@ namespace
             if (!ai || !ai->IsBotAI())
                 return;
 
+            // Standing in a company with a person makes this one a companion from here on -- including
+            // for the nights it spends out alone, which is what makes it worth asking where it has been.
+            if (OllamaGroupHasRealPlayer(witness))
+                Memory_NoteCompanion(witness->GetGUID().GetRawValue());
+
             const std::string place = PlaceNameFor(witness);
             Memory_NoteGameEvent(witness->GetGUID().GetRawValue(),
                                  place.empty() ? line : line + ", in " + place);

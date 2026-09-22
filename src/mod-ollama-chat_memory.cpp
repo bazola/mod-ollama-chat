@@ -46,6 +46,10 @@ namespace
 
     std::unordered_map<uint64_t, OllamaMemoryState> g_state;
 
+    // Bots that have travelled with a person, and so keep deed memories (plan 38).
+    std::mutex                    g_CompanionMutex;
+    std::unordered_set<uint64_t>  g_Companions;
+
     std::string Escape(std::string v)
     {
         CharacterDatabase.EscapeString(v);
@@ -229,7 +233,10 @@ namespace
                 continue;
             line = line.substr(a);
 
-            if (line.size() < 8)     // not a real memory
+            // Eight characters was low enough to let a truncated answer's stubs through -- "The cost",
+            // "The memory", "The memory of" -- which then sit in the prompt as if they meant something.
+            // Four words is the floor for a thing worth remembering.
+            if (line.size() < 8 || std::count(line.begin(), line.end(), ' ') < 3)
                 continue;
 
             entry.text      = line;
@@ -589,9 +596,90 @@ void Memory_NoteExchange(uint64_t botGuid, uint64_t otherGuid,
 
 // --------------------------------------------------------------------------
 
+void Memory_LoadCompanions()
+{
+    // Which bots have ever stood in a company with a person. Same two tests the household gate uses to
+    // tell a person from furniture: not the random-bot account prefix, and actually signed in once --
+    // MERCHANTS (plans/17) owns ten level-1 traders who have never drawn breath.
+    std::string prefix = Lower(sConfigMgr->GetOption<std::string>(
+        "AiPlayerbot.RandomBotAccountPrefix", "rndbot"));
+
+    std::unordered_set<uint32_t> realAccounts;
+    if (QueryResult result = LoginDatabase.Query(
+            "SELECT id, username FROM account WHERE last_login IS NOT NULL"))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            if (Lower(f[1].Get<std::string>()).rfind(prefix, 0) != 0)
+                realAccounts.insert(f[0].Get<uint32_t>());
+        } while (result->NextRow());
+    }
+
+    std::unordered_set<uint32_t> realChars;
+    if (QueryResult result = CharacterDatabase.Query("SELECT guid, account FROM characters"))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            if (realAccounts.count(f[1].Get<uint32_t>()))
+                realChars.insert(f[0].Get<uint32_t>());
+        } while (result->NextRow());
+    }
+
+    // mod-ledger owns this table; if it is not installed the set simply starts empty and fills live as
+    // bots are seen grouped with someone. A player's guid has no high part, so the raw guid is the low one.
+    std::unordered_set<uint64_t> found;
+    if (QueryResult result = CharacterDatabase.Query(
+            "SELECT actor_guid, COALESCE(subject_guid, 0) FROM ledger_event WHERE event_type = 'group_join'"))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            const uint32_t actor   = f[0].Get<uint32_t>();
+            const uint32_t subject = f[1].Get<uint32_t>();
+            if (subject && realChars.count(subject) && !realChars.count(actor))
+                found.insert(actor);
+            else if (subject && realChars.count(actor) && !realChars.count(subject))
+                found.insert(subject);
+        } while (result->NextRow());
+    }
+
+    const size_t n = found.size();
+    {
+        std::lock_guard<std::mutex> lock(g_CompanionMutex);
+        g_Companions = std::move(found);
+    }
+    LOG_INFO("module.ollamachat",
+             "[Ollama Chat] {} bots have travelled with a person; only they keep deed memories.", n);
+}
+
+
+void Memory_NoteCompanion(uint64_t botGuid)
+{
+    if (botGuid == 0)
+        return;
+
+    std::lock_guard<std::mutex> lock(g_CompanionMutex);
+    g_Companions.insert(botGuid);
+}
+
+
+bool Memory_IsCompanion(uint64_t botGuid)
+{
+    std::lock_guard<std::mutex> lock(g_CompanionMutex);
+    return g_Companions.count(botGuid) != 0;
+}
+
+
 void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line)
 {
     if (!g_MemoryEnable || !g_MemoryEventEnable || botGuid == 0 || line.empty())
+        return;
+
+    // Only a bot someone has actually travelled with. Every other bot in the world is doing something
+    // right now, and none of it is anyone's business.
+    if (!Memory_IsCompanion(botGuid))
         return;
 
     Player* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
@@ -725,8 +813,10 @@ std::string Memory_BuildEventPrompt(Player* bot)
             company += member->GetName();
         }
     }
+    // Not "no one; you were alone": asked who was with it, a model handed that phrasing back as something
+    // to remember, and 131 of 892 memories were about solitude rather than about anything that happened.
     if (company.empty())
-        company = "no one; you were alone";
+        company = "no one";
 
     return SafeFormat(g_MemoryEventPrompt,
                       fmt::arg("bot_name", bot->GetName()),

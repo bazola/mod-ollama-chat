@@ -2076,6 +2076,34 @@ OllamaChat.Memory.MaxPerBot = 40
 #        Default: 10
 OllamaChat.Memory.SaveInterval = 10
 
+#    OllamaChat.Memory.EventEnable
+#        Let a deed become a memory, not only a conversation (plan 38).
+#
+#        Condensation can only ever distil what was SAID to a bot and answered,
+#        so a night of questing, dying and killing leaves no trace: a bot can
+#        stand over a dead boss and have no way to remember it. With this on,
+#        notable events -- a boss falling, a death, a task finished, a prize
+#        taken -- are buffered per bot and digested by the model into memories
+#        that name the place and the company.
+#
+#        Ordinary kills are deliberately excluded: they are tens of thousands a
+#        day, and a dungeon's elites are its trash.
+#        Default: 1
+OllamaChat.Memory.EventEnable = 1
+
+#    OllamaChat.Memory.EventFlushCount
+#        How many notable deeds a bot buffers before they are digested in one
+#        model call. Lower = more immediate memories and more calls.
+#        Default: 4
+OllamaChat.Memory.EventFlushCount = 4
+
+#    OllamaChat.Memory.EventFlushSeconds
+#        Flush a part-filled buffer once its oldest deed is this old, so a bot
+#        that saw three things and then walked away still writes them down.
+#        0 disables the stale flush (a buffer then waits for a full count).
+#        Default: 300
+OllamaChat.Memory.EventFlushSeconds = 300
+
 #    OllamaChat.Memory.CondensePrompt
 #        Prompt used to distil history into memories.
 #        Placeholders: {bot_name} {history}
@@ -2214,6 +2242,12 @@ OllamaChat.Memory.CondensePrompt = ""
 #   Description: Wrapper around the memory list injected into a prompt.
 #   Empty = use the built-in default.
 OllamaChat.Memory.PromptTemplate = ""
+
+# OllamaChat.Memory.EventPrompt
+#   Description: Prompt that turns a bot's buffered deeds into memories.
+#   Placeholders: {bot_name} {company} {events}
+#   Empty = use the built-in default.
+OllamaChat.Memory.EventPrompt = ""
 
 # OllamaChat.Relationship.PromptTemplate
 #   Description: Wrapper around the relationship list injected into a prompt.

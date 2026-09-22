@@ -46,7 +46,8 @@ namespace
 {
     using Clock = std::chrono::steady_clock;
 
-    enum class TaskType : uint8_t { ChatReply, Sentiment, Condense, Relationship, Classify, HeldTongue };
+    enum class TaskType : uint8_t { ChatReply, Sentiment, Condense, Relationship, Classify, HeldTongue,
+                                    EventDigest };
 
     struct Task
     {
@@ -368,6 +369,9 @@ namespace
                         break;
                     case TaskType::HeldTongue:
                         RunHeldTongueTask(task);
+                        break;
+                    case TaskType::EventDigest:
+                        Memory_RunEventDigest(task.memoryBotGuid, task.memoryPrompt);
                         break;
                     default:
                         RunChatTask(task);
@@ -1500,6 +1504,20 @@ void OllamaDispatch_SubmitCondensation(uint64_t botGuid, const std::string& prom
 
     Task task;
     task.type          = TaskType::Condense;
+    task.memoryBotGuid = botGuid;
+    task.memoryPrompt  = prompt;
+
+    if (SubmitBackground(std::move(task)))
+        g_queueCv.notify_one();
+}
+
+void OllamaDispatch_SubmitEventDigest(uint64_t botGuid, const std::string& prompt)
+{
+    if (botGuid == 0 || prompt.empty())
+        return;
+
+    Task task;
+    task.type          = TaskType::EventDigest;
     task.memoryBotGuid = botGuid;
     task.memoryPrompt  = prompt;
 

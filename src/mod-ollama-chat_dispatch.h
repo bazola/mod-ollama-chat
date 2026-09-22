@@ -179,6 +179,11 @@ void OllamaDispatch_SubmitSentiment(uint64_t botGuid, uint64_t playerGuid,
 // Fire-and-forget; runs entirely on a worker.
 void OllamaDispatch_SubmitCondensation(uint64_t botGuid, const std::string& prompt);
 
+// Distil a bot's buffered deeds into lasting memories (plan 38). Same shape as
+// condensation, and for the same reason: it ends in a mutex-guarded store
+// write, never in a spoken line, so it needs no trip back to the world thread.
+void OllamaDispatch_SubmitEventDigest(uint64_t botGuid, const std::string& prompt);
+
 // Write or revise how a bot feels about someone.
 void OllamaDispatch_SubmitRelationship(uint64_t botGuid, uint64_t otherGuid,
                                        const std::string& otherName,

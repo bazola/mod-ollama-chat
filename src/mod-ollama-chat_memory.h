@@ -86,6 +86,26 @@ void Memory_NoteExchange(uint64_t botGuid, uint64_t otherGuid,
 // Thread-safe. Marks the bot dirty so the periodic save persists it.
 void Memory_Remember(uint64_t botGuid, const std::string& text, uint8_t importance);
 
+// Buffer one notable thing a bot did or watched happen (plan 38).
+//
+// Condensation can only ever distil what was SAID to a bot and answered, so a
+// night of questing, dying and killing leaves no trace at all: a bot can stand
+// over a dead boss and have no way to remember it. This is the other door in.
+// Events accumulate per bot and are digested by the model in one call, so the
+// cost is one request per handful of deeds rather than one per kill.
+//
+// `line` is already plain third-person English naming the actor, the deed and
+// the place -- built on the world thread, because the place and the company can
+// only be read there.
+//
+// World thread only. Submits the digest itself once the buffer is full.
+void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line);
+
+// Flush any part-filled event buffer that has gone stale, so a bot that saw
+// three things and then walked away still writes them down. World thread only;
+// called from the module's maintenance tick.
+void Memory_FlushStaleEvents();
+
 // Prompt fragments. World thread only.
 //
 // `about` may be null; when set, that person's relationship line is listed
@@ -98,6 +118,9 @@ std::string Memory_BuildPromptSection(Player* bot, Player* about);
 // Condense a bot's accumulated history into memories, then clear the history.
 void Memory_RunCondensation(uint64_t botGuid, const std::string& prompt);
 
+// Digest a bot's buffered deeds into memories, then clear the buffer.
+void Memory_RunEventDigest(uint64_t botGuid, const std::string& prompt);
+
 // Write or revise how a bot feels about someone.
 void Memory_RunRelationshipUpdate(uint64_t botGuid, uint64_t otherGuid,
                                   const std::string& otherName,
@@ -106,6 +129,7 @@ void Memory_RunRelationshipUpdate(uint64_t botGuid, uint64_t otherGuid,
 // --- prompt builders (world thread; they read config templates) -----------
 
 std::string Memory_BuildCondensationPrompt(Player* bot);
+std::string Memory_BuildEventPrompt(Player* bot);
 std::string Memory_BuildRelationshipPrompt(Player* bot, uint64_t otherGuid,
                                            const std::string& otherName);
 

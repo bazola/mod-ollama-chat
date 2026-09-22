@@ -297,6 +297,11 @@ void OllamaBotRandomChatter::OnUpdate(uint32 diff)
         maintenanceTimer = 30000;
         Governor_Update();
         Topics_Update();
+
+        // A bot that saw three things and then walked away still has them to
+        // write down; without this its buffer waits for a fourth deed that may
+        // never come (plan 38).
+        Memory_FlushStaleEvents();
     }
     else
     {

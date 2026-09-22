@@ -134,6 +134,73 @@ namespace
             return SafeFormat("{} learned {}", actor, detail);
         return "";
     }
+
+    // Which deeds are worth remembering (plan 38).
+    //
+    // Deliberately NOT g_EventTypeDefeated: ordinary kills are 48,000 a day on
+    // this realm and a dungeon's elites are its trash, so a rank alone is no
+    // signal. A boss, a death, a task finished, a prize taken, a person cut
+    // down -- those are the things anyone would still be telling afterwards.
+    bool IsMemorableEvent(const std::string& type)
+    {
+        return type == g_EventTypeDefeatedBoss   || type == g_EventTypeDied ||
+               type == g_EventTypeCompletedQuest || type == g_EventTypeDefeatedPlayer ||
+               type == g_EventTypeGotItem        || type == g_EventTypeLeveledUp ||
+               type == g_EventTypeWonDuel        || type == g_EventTypeAchievement;
+    }
+
+    // Where this happened, told the way a person would tell it: the dungeon's
+    // own name when inside one, the zone otherwise. The area accessors live on
+    // PlayerbotAI, so this only answers for bots -- which is all it is asked.
+    std::string PlaceNameFor(Player* bot)
+    {
+        if (!bot)
+            return "";
+
+        if (Map* map = bot->GetMap(); map && map->IsDungeon())
+            return map->GetMapName();
+
+        PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+        if (!ai)
+            return "";
+
+        AreaTableEntry const* zone = ai->GetCurrentZone();
+        return zone ? PlayerbotAI::GetLocalizedAreaName(zone) : "";
+    }
+
+    // Hand the deed to every bot who was there to see it, the actor included --
+    // a bot that dies four times in a marsh should remember it above all.
+    void BroadcastEventMemory(Player* actor, const std::string& line, float radius)
+    {
+        if (!actor || line.empty() || !g_MemoryEnable || !g_MemoryEventEnable)
+            return;
+
+        auto note = [&line](Player* witness)
+        {
+            PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(witness);
+            if (!ai || !ai->IsBotAI())
+                return;
+
+            const std::string place = PlaceNameFor(witness);
+            Memory_NoteGameEvent(witness->GetGUID().GetRawValue(),
+                                 place.empty() ? line : line + ", in " + place);
+        };
+
+        note(actor);
+
+        for (auto const& pair : ObjectAccessor::GetPlayers())
+        {
+            Player* witness = pair.second;
+            if (!witness || witness == actor || !witness->IsInWorld())
+                continue;
+            if (witness->GetMap() != actor->GetMap())
+                continue;
+            if (!actor->IsWithinDistInMap(witness, radius))
+                continue;
+
+            note(witness);
+        }
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -151,7 +218,16 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
     // Seed the witnessed-event memory before any chance roll: bots should
     // remember what they saw even when they choose not to comment on it.
     if (const std::string memory = MemoryLineFor(source->GetName(), type, detail); !memory.empty())
+    {
         Topics_BroadcastEventToNearby(source, memory, g_EventChatterRealPlayerDistance);
+
+        // The topic engine keeps this only long enough to talk about. A deed
+        // worth remembering also goes to the memory store, which outlives the
+        // conversation -- and unlike condensation, it does not need anyone to
+        // have said a word about it (plan 38).
+        if (IsMemorableEvent(type))
+            BroadcastEventMemory(source, memory, g_EventChatterRealPlayerDistance);
+    }
 
     const bool isGuildEvent = source->GetGuild() && g_EnableGuildEventChatter &&
                               IsGuildEventType(type) &&

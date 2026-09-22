@@ -373,6 +373,15 @@ extern uint32_t    g_MemorySaveInterval;        // minutes
 extern std::string g_MemoryCondensePrompt;
 extern std::string g_MemoryPromptTemplate;
 
+// Event memories (plan 38): a deed a bot took part in or watched becomes a
+// memory of its own, so "what did we do together" has an answer that was never
+// spoken aloud. Conversation condensation cannot supply this -- it only ever
+// sees lines that were said to the bot and answered.
+extern bool        g_MemoryEventEnable;
+extern uint32_t    g_MemoryEventFlushCount;     // notable events buffered before one call
+extern uint32_t    g_MemoryEventFlushSeconds;   // flush a part-filled buffer this stale
+extern std::string g_MemoryEventPrompt;
+
 extern bool        g_RelationshipEnable;
 extern uint32_t    g_RelationshipMentionThreshold;
 extern uint32_t    g_RelationshipMaxPerPrompt;

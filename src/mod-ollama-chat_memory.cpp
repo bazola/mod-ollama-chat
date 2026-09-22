@@ -36,6 +36,12 @@ namespace
         bool condensing = false;    // a job is already in flight
         std::unordered_map<uint64_t, bool> relationshipPending;
         bool dirty = false;
+
+        // Deeds witnessed since the last digest (plan 38), with the time the
+        // first one landed so a part-filled buffer can be flushed when stale.
+        std::vector<std::string> eventBuffer;
+        uint64_t                 eventFirstAt  = 0;
+        bool                     eventFlushing = false;
     };
 
     std::unordered_map<uint64_t, OllamaMemoryState> g_state;
@@ -583,6 +589,97 @@ void Memory_NoteExchange(uint64_t botGuid, uint64_t otherGuid,
 
 // --------------------------------------------------------------------------
 
+void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line)
+{
+    if (!g_MemoryEnable || !g_MemoryEventEnable || botGuid == 0 || line.empty())
+        return;
+
+    Player* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
+    if (!bot)
+        return;
+
+    bool trigger = false;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        OllamaMemoryState& state = g_state[botGuid];
+
+        if (state.eventBuffer.empty())
+            state.eventFirstAt = NowSeconds();
+
+        state.eventBuffer.push_back(line);
+
+        // A long fight must not grow this without bound while a digest is in
+        // flight: keep the most recent, because a stale deed matters least.
+        const size_t hardCap = size_t(g_MemoryEventFlushCount ? g_MemoryEventFlushCount : 4) * 3;
+        while (state.eventBuffer.size() > hardCap)
+            state.eventBuffer.erase(state.eventBuffer.begin());
+
+        if (!state.eventFlushing && g_MemoryEventFlushCount > 0 &&
+            state.eventBuffer.size() >= g_MemoryEventFlushCount)
+        {
+            state.eventFlushing = true;
+            trigger = true;
+        }
+    }
+
+    if (!trigger)
+        return;
+
+    std::string prompt = Memory_BuildEventPrompt(bot);
+    if (prompt.empty())
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_state[botGuid].eventFlushing = false;
+        return;
+    }
+
+    OllamaDispatch_SubmitEventDigest(botGuid, prompt);
+}
+
+void Memory_FlushStaleEvents()
+{
+    if (!g_MemoryEnable || !g_MemoryEventEnable || g_MemoryEventFlushSeconds == 0)
+        return;
+
+    const uint64_t now = NowSeconds();
+
+    // Claim the stale buffers under the lock, then build and submit outside it:
+    // Memory_BuildEventPrompt takes the same mutex.
+    std::vector<uint64_t> due;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        for (auto& [botGuid, state] : g_state)
+        {
+            if (state.eventFlushing || state.eventBuffer.empty())
+                continue;
+            if (now - state.eventFirstAt < g_MemoryEventFlushSeconds)
+                continue;
+
+            state.eventFlushing = true;
+            due.push_back(botGuid);
+        }
+    }
+
+    for (const uint64_t botGuid : due)
+    {
+        Player* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
+        std::string prompt = bot ? Memory_BuildEventPrompt(bot) : "";
+
+        if (prompt.empty())
+        {
+            // The bot has logged out, or there is no template. Release the
+            // claim; the buffer keeps until it comes back.
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_state[botGuid].eventFlushing = false;
+            continue;
+        }
+
+        OllamaDispatch_SubmitEventDigest(botGuid, prompt);
+    }
+}
+
+// --------------------------------------------------------------------------
+
 std::string Memory_BuildCondensationPrompt(Player* bot)
 {
     if (!bot || g_MemoryCondensePrompt.empty())
@@ -595,6 +692,46 @@ std::string Memory_BuildCondensationPrompt(Player* bot)
     return SafeFormat(g_MemoryCondensePrompt,
                       fmt::arg("bot_name", bot->GetName()),
                       fmt::arg("history", history));
+}
+
+std::string Memory_BuildEventPrompt(Player* bot)
+{
+    if (!bot || g_MemoryEventPrompt.empty())
+        return "";
+
+    std::string events;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = g_state.find(bot->GetGUID().GetRawValue());
+        if (it == g_state.end() || it->second.eventBuffer.empty())
+            return "";
+
+        for (const std::string& line : it->second.eventBuffer)
+            events += " - " + line + "\n";
+    }
+
+    // The company is read here and not at buffer time: who you were with is a
+    // fact about the outing, and the group is only safe to walk on this thread.
+    std::string company;
+    if (Group* group = bot->GetGroup())
+    {
+        for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+        {
+            Player* member = ref->GetSource();
+            if (!member || member == bot || !member->IsInWorld())
+                continue;
+            if (!company.empty())
+                company += ", ";
+            company += member->GetName();
+        }
+    }
+    if (company.empty())
+        company = "no one; you were alone";
+
+    return SafeFormat(g_MemoryEventPrompt,
+                      fmt::arg("bot_name", bot->GetName()),
+                      fmt::arg("company", company),
+                      fmt::arg("events", events));
 }
 
 std::string Memory_BuildRelationshipPrompt(Player* bot, uint64_t otherGuid,
@@ -785,6 +922,62 @@ void Memory_RunCondensation(uint64_t botGuid, const std::string& prompt)
     if (g_DebugEnabled)
         LOG_INFO("module.ollamachat",
                  "[Ollama Chat] Condensed history for bot {} into {} memories.",
+                 botGuid, fresh.size());
+}
+
+void Memory_RunEventDigest(uint64_t botGuid, const std::string& prompt)
+{
+    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::Sentiment);
+
+    std::vector<BotMemoryEntry> fresh;
+    if (api.ok)
+        fresh = ParseMemories(api.text);
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        OllamaMemoryState& state = g_state[botGuid];
+        state.eventFlushing = false;
+
+        if (api.ok)
+        {
+            // Distilled or not, these deeds have had their turn: keeping them
+            // would re-digest the same fight on the next flush.
+            state.eventBuffer.clear();
+            state.eventFirstAt = 0;
+        }
+
+        if (!fresh.empty())
+        {
+            state.memories.insert(state.memories.end(), fresh.begin(), fresh.end());
+
+            // Keep the most important, drop the rest.
+            std::sort(state.memories.begin(), state.memories.end(),
+                      [](const BotMemoryEntry& a, const BotMemoryEntry& b)
+                      {
+                          if (a.importance != b.importance)
+                              return a.importance > b.importance;
+                          return a.createdAt > b.createdAt;
+                      });
+
+            if (g_MemoryMaxPerBot > 0 && state.memories.size() > g_MemoryMaxPerBot)
+                state.memories.resize(g_MemoryMaxPerBot);
+
+            state.dirty = true;
+        }
+    }
+
+    if (!api.ok)
+    {
+        if (g_DebugEnabled)
+            LOG_INFO("module.ollamachat",
+                     "[Ollama Chat] Event digest failed for bot {}: {}",
+                     botGuid, api.error);
+        return;      // keep the deeds; we will try again on the next one
+    }
+
+    if (g_DebugEnabled)
+        LOG_INFO("module.ollamachat",
+                 "[Ollama Chat] Digested deeds for bot {} into {} memories.",
                  botGuid, fresh.size());
 }
 

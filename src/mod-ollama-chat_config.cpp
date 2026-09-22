@@ -237,6 +237,11 @@ uint32_t    g_MemorySaveInterval       = 10;
 std::string g_MemoryCondensePrompt;
 std::string g_MemoryPromptTemplate;
 
+bool        g_MemoryEventEnable        = true;
+uint32_t    g_MemoryEventFlushCount    = 4;
+uint32_t    g_MemoryEventFlushSeconds  = 300;
+std::string g_MemoryEventPrompt;
+
 bool        g_RelationshipEnable            = true;
 uint32_t    g_RelationshipMentionThreshold  = 8;
 uint32_t    g_RelationshipMaxPerPrompt      = 3;
@@ -722,6 +727,25 @@ void LoadOllamaChatConfig()
     g_MemoryPromptTemplate         = sConfigMgr->GetOption<std::string>("OllamaChat.Memory.PromptTemplate", "");
     if (g_MemoryPromptTemplate.empty())
         g_MemoryPromptTemplate = " Things you remember:\n{memories}";
+
+    // --- Event memories (plan 38) ----------------------------------------
+    g_MemoryEventEnable            = sConfigMgr->GetOption<bool>("OllamaChat.Memory.EventEnable", true);
+    g_MemoryEventFlushCount        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.EventFlushCount", 4);
+    g_MemoryEventFlushSeconds      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.EventFlushSeconds", 300);
+
+    g_MemoryEventPrompt            = sConfigMgr->GetOption<std::string>("OllamaChat.Memory.EventPrompt", "");
+    if (g_MemoryEventPrompt.empty())
+    {
+        g_MemoryEventPrompt =
+            "You are {bot_name}, a person living in Azeroth. These things happened where you stood, "
+            "and you were there for them. Who was with you: {company}.\n"
+            "{events}\n"
+            "Write what you will still remember of this long afterwards: what happened, where it happened, "
+            "who stood with you, what fell, and what it cost or won. One per line. Prefix each with an "
+            "importance from 1 to 10 and a pipe, like \"7 | ...\". Name the place and name the people. "
+            "Write them in the third person as short factual notes, at most 25 words each, in the terms of "
+            "the world itself: no games, levels, specs or players. If nothing is worth keeping, write nothing.";
+    }
 
     g_RelationshipEnable           = sConfigMgr->GetOption<bool>("OllamaChat.Relationship.Enable", true);
     g_RelationshipMentionThreshold = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MentionThreshold", 8);

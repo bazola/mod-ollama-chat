@@ -677,9 +677,10 @@ void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line)
     if (!g_MemoryEnable || !g_MemoryEventEnable || botGuid == 0 || line.empty())
         return;
 
-    // Only a bot someone has actually travelled with. Every other bot in the world is doing something
-    // right now, and none of it is anyone's business.
-    if (!Memory_IsCompanion(botGuid))
+    // Optionally only a bot someone has actually travelled with. Left as a switch rather than a rule
+    // because the cost of the alternative turned out to be affordable once the stale flush stopped
+    // digesting near-empty buffers: it is the thin digests that were expensive, not the world being busy.
+    if (g_MemoryEventCompanionsOnly && !Memory_IsCompanion(botGuid))
         return;
 
     Player* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
@@ -742,6 +743,19 @@ void Memory_FlushStaleEvents()
                 continue;
             if (now - state.eventFirstAt < g_MemoryEventFlushSeconds)
                 continue;
+
+            // A buffer this thin is dropped rather than digested, and this one test is what makes the
+            // whole world affordable. Measured on the first night: 57 notable events became 284 model
+            // calls, because every bot that had witnessed ANYTHING got a full generation once its five
+            // minutes were up. The deeds were never the cost; flushing near-empty buffers was. It is also
+            // where the quality went -- asked to remember one thing, the model padded to fill the quota,
+            // which is why three quarters of those memories named no place and read like weather.
+            if (state.eventBuffer.size() < g_MemoryEventFlushMinimum)
+            {
+                state.eventBuffer.clear();
+                state.eventFirstAt = 0;
+                continue;
+            }
 
             state.eventFlushing = true;
             due.push_back(botGuid);

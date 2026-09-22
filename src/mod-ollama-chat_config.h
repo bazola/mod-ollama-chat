@@ -381,6 +381,8 @@ extern bool        g_MemoryEventEnable;
 extern uint32_t    g_MemoryEventFlushCount;     // notable events buffered before one call
 extern uint32_t    g_MemoryEventFlushSeconds;   // flush a part-filled buffer this stale
 extern std::string g_MemoryEventPrompt;
+extern uint32_t    g_MemoryEventFlushMinimum;  // a stale buffer thinner than this is dropped, not digested
+extern bool        g_MemoryEventCompanionsOnly; // 1 = only bots who have travelled with a person
 
 extern bool        g_RelationshipEnable;
 extern uint32_t    g_RelationshipMentionThreshold;

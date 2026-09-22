@@ -241,6 +241,8 @@ bool        g_MemoryEventEnable        = true;
 uint32_t    g_MemoryEventFlushCount    = 4;
 uint32_t    g_MemoryEventFlushSeconds  = 300;
 std::string g_MemoryEventPrompt;
+uint32_t    g_MemoryEventFlushMinimum   = 3;
+bool        g_MemoryEventCompanionsOnly = false;
 
 bool        g_RelationshipEnable            = true;
 uint32_t    g_RelationshipMentionThreshold  = 8;
@@ -732,6 +734,8 @@ void LoadOllamaChatConfig()
     g_MemoryEventEnable            = sConfigMgr->GetOption<bool>("OllamaChat.Memory.EventEnable", true);
     g_MemoryEventFlushCount        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.EventFlushCount", 4);
     g_MemoryEventFlushSeconds      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.EventFlushSeconds", 300);
+    g_MemoryEventFlushMinimum      = sConfigMgr->GetOption<uint32_t>("OllamaChat.Memory.EventFlushMinimum", 3);
+    g_MemoryEventCompanionsOnly    = sConfigMgr->GetOption<bool>("OllamaChat.Memory.EventCompanionsOnly", false);
 
     g_MemoryEventPrompt            = sConfigMgr->GetOption<std::string>("OllamaChat.Memory.EventPrompt", "");
     if (g_MemoryEventPrompt.empty())

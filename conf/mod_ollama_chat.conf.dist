@@ -2104,6 +2104,28 @@ OllamaChat.Memory.EventFlushCount = 4
 #        Default: 300
 OllamaChat.Memory.EventFlushSeconds = 300
 
+#    OllamaChat.Memory.EventFlushMinimum
+#        When the stale timer fires, a buffer holding fewer deeds than this is
+#        DROPPED rather than digested.
+#
+#        This is the setting that makes the whole fleet affordable. Without it,
+#        57 notable events produced 284 model calls in half an hour, because
+#        every bot that had witnessed anything at all got a full generation once
+#        its five minutes were up -- the cost scaled with how many bots saw
+#        something, not with how much happened. It is also where the quality
+#        went: asked to remember one thing, the model padded to fill the quota.
+#        Default: 3
+OllamaChat.Memory.EventFlushMinimum = 3
+
+#    OllamaChat.Memory.EventCompanionsOnly
+#        1 = only bots that have stood in a company with a real person keep
+#        deed memories. 0 = every bot in the world keeps its own.
+#
+#        Kept as a switch because it can be flipped with a reload, and the first
+#        fleet-wide night wanted turning off in a hurry.
+#        Default: 0
+OllamaChat.Memory.EventCompanionsOnly = 0
+
 #    OllamaChat.Memory.CondensePrompt
 #        Prompt used to distil history into memories.
 #        Placeholders: {bot_name} {history}

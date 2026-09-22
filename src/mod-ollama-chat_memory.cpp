@@ -276,6 +276,8 @@ void Memory_Load()
             e.importance = f[2].Get<uint8>();
             e.createdAt  = f[3].Get<uint64>();
 
+            e.persisted  = true;   // it came out of the table; never insert it again
+
             if (!e.text.empty())
             {
                 g_state[f[0].Get<uint64>()].memories.push_back(std::move(e));
@@ -283,7 +285,50 @@ void Memory_Load()
             }
         } while (result->NextRow());
 
+        // The table is a superset of what a bot carries in its head now: saving
+        // is insert-only, so a memory pushed out by the cap stays on disk. Trim
+        // to the cap here, keeping the most important, as the condense and
+        // digest paths already do.
+        if (g_MemoryMaxPerBot > 0)
+        {
+            for (auto& [botGuid, state] : g_state)
+            {
+                if (state.memories.size() <= g_MemoryMaxPerBot)
+                    continue;
+
+                std::sort(state.memories.begin(), state.memories.end(),
+                          [](const BotMemoryEntry& a, const BotMemoryEntry& b)
+                          {
+                              if (a.importance != b.importance)
+                                  return a.importance > b.importance;
+                              return a.createdAt > b.createdAt;
+                          });
+                state.memories.resize(g_MemoryMaxPerBot);
+            }
+        }
+
         LOG_INFO("module.ollamachat", "[Ollama Chat] Loaded {} bot memories.", loaded);
+    }
+
+    // Deeds that were witnessed but never digested (plan 41 M4). A thin buffer
+    // is deliberately never digested -- that test is what keeps the fleet
+    // affordable -- so the table is the only place those deeds can survive a
+    // logout or a restart.
+    if (QueryResult result = CharacterDatabase.Query(
+            "SELECT bot_guid, line, first_at FROM mod_ollama_chat_event_buffer "
+            "ORDER BY bot_guid, line_no"))
+    {
+        uint32_t deeds = 0;
+        do
+        {
+            Field* f = result->Fetch();
+            OllamaMemoryState& state = g_state[f[0].Get<uint64>()];
+            state.eventBuffer.push_back(f[1].Get<std::string>());
+            state.eventFirstAt = f[2].Get<uint64>();
+            ++deeds;
+        } while (result->NextRow());
+
+        LOG_INFO("module.ollamachat", "[Ollama Chat] Loaded {} undigested deeds.", deeds);
     }
 
     if (QueryResult result = CharacterDatabase.Query(
@@ -448,37 +493,61 @@ void Memory_Remember(uint64_t botGuid, const std::string& text, uint8_t importan
     state.dirty = true;
 }
 
-void Memory_SaveAll()
+namespace
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    for (auto& [botGuid, state] : g_state)
+    // Append one bot's unsaved state to a transaction. Caller holds g_mutex.
+    //
+    // INSERT-ONLY (plan 41 M2). This used to DELETE every row for the bot and
+    // reinsert the RAM vector, which made the table a projection of memory
+    // rather than a record of it: anything RAM had dropped -- a memory evicted
+    // at the cap, a state erased on logout before the next save -- was
+    // destroyed on the following write. A memory is now written once and never
+    // deleted here, so the table is a superset and the cap bounds only what a
+    // bot carries in its head.
+    void AppendBotSave(CharacterDatabaseTransaction& trans, uint64_t botGuid,
+                       OllamaMemoryState& state)
     {
-        if (!state.dirty)
-            continue;
-
-        // The delete and the reinserts have to land together. As separate
-        // async statements, a crash between them left the bot with no memories
-        // at all, which is worse than a stale set.
-        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-
-        trans->Append(SafeFormat(
-            "DELETE FROM mod_ollama_chat_memories WHERE bot_guid = {}", botGuid));
-
         std::string values;
-        for (const BotMemoryEntry& m : state.memories)
+        for (BotMemoryEntry& m : state.memories)
         {
+            if (m.persisted)
+                continue;
+
             if (!values.empty())
                 values += ',';
 
             values += SafeFormat("({}, '{}', {}, FROM_UNIXTIME({}))",
                                  botGuid, Escape(m.text), uint32_t(m.importance), m.createdAt);
+            m.persisted = true;
         }
 
         if (!values.empty())
         {
             trans->Append("INSERT INTO mod_ollama_chat_memories "
                           "(bot_guid, memory_text, importance, created_at) VALUES " + values);
+        }
+
+        // The undigested deeds (plan 41 M4). Small, rewritten whole, and the
+        // only copy that exists: a buffer under EventFlushMinimum is never
+        // digested on purpose, so without this it dies with the session.
+        trans->Append(SafeFormat(
+            "DELETE FROM mod_ollama_chat_event_buffer WHERE bot_guid = {}", botGuid));
+
+        if (!state.eventBuffer.empty())
+        {
+            std::string deeds;
+            uint32_t lineNo = 0;
+            for (const std::string& line : state.eventBuffer)
+            {
+                if (!deeds.empty())
+                    deeds += ',';
+
+                deeds += SafeFormat("({}, {}, '{}', {})",
+                                    botGuid, lineNo++, Escape(line), state.eventFirstAt);
+            }
+
+            trans->Append("INSERT INTO mod_ollama_chat_event_buffer "
+                          "(bot_guid, line_no, line, first_at) VALUES " + deeds);
         }
 
         for (const auto& [otherGuid, r] : state.relationships)
@@ -499,19 +568,113 @@ void Memory_SaveAll()
                 botGuid, otherGuid, Escape(r.otherName), Escape(r.description),
                 r.mentions, r.updatedAt ? r.updatedAt : NowSeconds()));
         }
+    }
+}
 
+void Memory_SaveAll()
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    for (auto& [botGuid, state] : g_state)
+    {
+        if (!state.dirty)
+            continue;
+
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        AppendBotSave(trans, botGuid, state);
         CharacterDatabase.CommitTransaction(trans);
 
         state.dirty = false;
     }
 }
 
+void Memory_LoadBot(uint64_t botGuid)
+{
+    if (!g_MemoryEnable || botGuid == 0)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_state.count(botGuid))
+            return;                      // already in hand; startup loaded it
+    }
+
+    std::vector<BotMemoryEntry> loaded;
+    if (QueryResult result = CharacterDatabase.Query(SafeFormat(
+            "SELECT memory_text, importance, UNIX_TIMESTAMP(created_at) "
+            "FROM mod_ollama_chat_memories WHERE bot_guid = {} "
+            "ORDER BY importance DESC, created_at DESC", botGuid)))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            BotMemoryEntry e;
+            e.text       = f[0].Get<std::string>();
+            e.importance = f[1].Get<uint8>();
+            e.createdAt  = f[2].Get<uint64>();
+            e.persisted  = true;
+
+            if (!e.text.empty())
+                loaded.push_back(std::move(e));
+        } while (result->NextRow());
+    }
+
+    if (g_MemoryMaxPerBot > 0 && loaded.size() > g_MemoryMaxPerBot)
+        loaded.resize(g_MemoryMaxPerBot);
+
+    std::vector<std::string> deeds;
+    uint64_t firstAt = 0;
+    if (QueryResult result = CharacterDatabase.Query(SafeFormat(
+            "SELECT line, first_at FROM mod_ollama_chat_event_buffer "
+            "WHERE bot_guid = {} ORDER BY line_no", botGuid)))
+    {
+        do
+        {
+            Field* f = result->Fetch();
+            deeds.push_back(f[0].Get<std::string>());
+            firstAt = f[1].Get<uint64>();
+        } while (result->NextRow());
+    }
+
+    if (loaded.empty() && deeds.empty())
+        return;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    OllamaMemoryState& state = g_state[botGuid];
+
+    if (state.memories.empty())
+        state.memories = std::move(loaded);
+
+    if (state.eventBuffer.empty() && !deeds.empty())
+    {
+        state.eventBuffer  = std::move(deeds);
+        state.eventFirstAt = firstAt;
+    }
+}
+
 void Memory_ForgetBot(ObjectGuid botGuid)
 {
-    // Memories persist in the database; this only drops the in-memory copy for
-    // a character who has logged out.
+    // Save before forgetting (plan 41 M1). The comment that stood here said
+    // "Memories persist in the database; this only drops the in-memory copy" --
+    // true in isolation, and false in combination with a save path that rebuilt
+    // the table from RAM. Everything formed since the last periodic save, and
+    // the entire undigested deed buffer, died on this line.
+    const uint64_t raw = botGuid.GetRawValue();
+
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_state.erase(botGuid.GetRawValue());
+
+    auto it = g_state.find(raw);
+    if (it == g_state.end())
+        return;
+
+    if (it->second.dirty)
+    {
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        AppendBotSave(trans, raw, it->second);
+        CharacterDatabase.CommitTransaction(trans);
+    }
+
+    g_state.erase(it);
 }
 
 // --------------------------------------------------------------------------
@@ -591,7 +754,13 @@ void Memory_NoteExchange(uint64_t botGuid, uint64_t otherGuid,
         return;
     }
 
-    OllamaDispatch_SubmitCondensation(botGuid, prompt);
+    // As with the digest, a refused submit must release the claim (plan 41 M5);
+    // otherwise this bot stops condensing for the life of the process.
+    if (!OllamaDispatch_SubmitCondensation(botGuid, prompt))
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_state[botGuid].condensing = false;
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -701,6 +870,12 @@ void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line)
 
         state.eventBuffer.push_back(line);
 
+        // The buffer is durable state now (plan 41 M4), so a deed on its own is
+        // enough to make this bot worth writing out on the next save. Before
+        // this, a bot that witnessed things but formed no memory was never
+        // dirty, and its deeds existed only in RAM.
+        state.dirty = true;
+
         // A long fight must not grow this without bound while a digest is in
         // flight: keep the most recent, because a stale deed matters least.
         const size_t hardCap = size_t(g_MemoryEventFlushCount ? g_MemoryEventFlushCount : 4) * 3;
@@ -726,7 +901,15 @@ void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line)
         return;
     }
 
-    OllamaDispatch_SubmitEventDigest(botGuid, prompt);
+    // Check the submit (plan 41 M5). The queue refuses work when it is half
+    // full or shutting down, and the return value used to be dropped -- so the
+    // claim below stayed set for the life of the process and that bot never
+    // digested another deed.
+    if (!OllamaDispatch_SubmitEventDigest(botGuid, prompt))
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_state[botGuid].eventFlushing = false;
+    }
 }
 
 void Memory_FlushStaleEvents()
@@ -754,12 +937,16 @@ void Memory_FlushStaleEvents()
             // minutes were up. The deeds were never the cost; flushing near-empty buffers was. It is also
             // where the quality went -- asked to remember one thing, the model padded to fill the quota,
             // which is why three quarters of those memories named no place and read like weather.
+            // KEPT, not dropped (plan 41 M4). The test itself stands: digesting
+            // near-empty buffers is what took the fleet from ~3.5 model calls a
+            // minute to ~20, and it is where the quality went, because a model
+            // asked to remember one thing pads to fill the quota. What changed
+            // is what happens to the deeds afterwards -- they stay in the
+            // buffer, and the buffer is written to the table, so a bot that saw
+            // one thing alone in a dungeon still has it recorded. It costs
+            // nothing: no digest is run either way.
             if (state.eventBuffer.size() < g_MemoryEventFlushMinimum)
-            {
-                state.eventBuffer.clear();
-                state.eventFirstAt = 0;
                 continue;
-            }
 
             state.eventFlushing = true;
             due.push_back(botGuid);
@@ -780,7 +967,12 @@ void Memory_FlushStaleEvents()
             continue;
         }
 
-        OllamaDispatch_SubmitEventDigest(botGuid, prompt);
+        // Same stuck-flag guard as the count-triggered path (plan 41 M5).
+        if (!OllamaDispatch_SubmitEventDigest(botGuid, prompt))
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_state[botGuid].eventFlushing = false;
+        }
     }
 }
 

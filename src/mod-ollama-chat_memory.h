@@ -44,6 +44,11 @@ struct BotMemoryEntry
     std::string text;
     uint8_t     importance = 5;   // 1..10
     uint64_t    createdAt  = 0;   // unix seconds
+
+    // Already written to the table. Saving is insert-only (plan 41 M2), so this
+    // is what stops a memory being written twice; it is set on load and on the
+    // save that first persists it.
+    bool        persisted  = false;
 };
 
 struct BotRelationship
@@ -56,6 +61,15 @@ struct BotRelationship
 };
 
 void Memory_Load();
+
+// Load one bot's memories and undigested deeds, if it is not already in hand
+// (plan 41 M3).
+//
+// Memory_Load runs once, at startup. A bot that logs out has its state erased,
+// so without this it comes back with an empty head -- and before saving became
+// insert-only that empty head was then written over everything it knew.
+void Memory_LoadBot(uint64_t botGuid);
+
 void Memory_LoadHouseholds();
 bool Memory_MayTell(const std::string& text, const std::unordered_set<uint32_t>& presentAccounts);
 void Memory_SaveAll();

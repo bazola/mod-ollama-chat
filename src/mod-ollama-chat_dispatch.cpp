@@ -1497,32 +1497,44 @@ namespace
     }
 }
 
-void OllamaDispatch_SubmitCondensation(uint64_t botGuid, const std::string& prompt)
+bool OllamaDispatch_SubmitCondensation(uint64_t botGuid, const std::string& prompt)
 {
     if (botGuid == 0 || prompt.empty())
-        return;
+        return false;
 
     Task task;
     task.type          = TaskType::Condense;
     task.memoryBotGuid = botGuid;
     task.memoryPrompt  = prompt;
 
-    if (SubmitBackground(std::move(task)))
-        g_queueCv.notify_one();
+    // Report the refusal (plan 41 M5). The caller sets a flag before asking and
+    // clears it when the work completes; a silently dropped submit left that
+    // flag set forever.
+    if (!SubmitBackground(std::move(task)))
+        return false;
+
+    g_queueCv.notify_one();
+    return true;
 }
 
-void OllamaDispatch_SubmitEventDigest(uint64_t botGuid, const std::string& prompt)
+bool OllamaDispatch_SubmitEventDigest(uint64_t botGuid, const std::string& prompt)
 {
     if (botGuid == 0 || prompt.empty())
-        return;
+        return false;
 
     Task task;
     task.type          = TaskType::EventDigest;
     task.memoryBotGuid = botGuid;
     task.memoryPrompt  = prompt;
 
-    if (SubmitBackground(std::move(task)))
-        g_queueCv.notify_one();
+    // Same contract as the condensation submit (plan 41 M5): a refusal has to
+    // reach the caller, or eventFlushing stays true and that bot never digests
+    // another deed for the life of the process.
+    if (!SubmitBackground(std::move(task)))
+        return false;
+
+    g_queueCv.notify_one();
+    return true;
 }
 
 void OllamaDispatch_SubmitRelationship(uint64_t botGuid, uint64_t otherGuid,

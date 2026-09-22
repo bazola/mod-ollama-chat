@@ -90,7 +90,10 @@ public:
 class OllamaChatMaintenance : public PlayerScript
 {
 public:
-    OllamaChatMaintenance() : PlayerScript("OllamaChatMaintenance", { PLAYERHOOK_ON_LOGOUT }) {}
+    OllamaChatMaintenance()
+        : PlayerScript("OllamaChatMaintenance",
+                       { PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT }) {}
+    void OnPlayerLogin(Player* player) override;
     void OnPlayerLogout(Player* player) override;
 };
 

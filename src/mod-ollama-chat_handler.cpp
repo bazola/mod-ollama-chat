@@ -2515,6 +2515,22 @@ std::string BuildEmoteReactionPrompt(Player* bot, Player* player, uint32_t textE
 // Maintenance
 // --------------------------------------------------------------------------
 
+void OllamaChatMaintenance::OnPlayerLogin(Player* player)
+{
+    if (!player)
+        return;
+
+    // Bring back what this bot knows (plan 41 M3). Memory_Load runs once, at
+    // startup; a bot that logs out has its state erased, so without this it
+    // returns with an empty head. Startup already holds every bot that had
+    // memories, so this only does real work for a character that rotated in
+    // afterwards -- and it is a no-op for real players.
+    if (!OllamaIsBotPlayer(player))
+        return;
+
+    Memory_LoadBot(player->GetGUID().GetRawValue());
+}
+
 void OllamaChatMaintenance::OnPlayerLogout(Player* player)
 {
     if (!player)

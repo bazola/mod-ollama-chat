@@ -1,6 +1,7 @@
 #include "mod-ollama-chat_response.h"
 #include "mod-ollama-chat_config.h"
 #include "mod-ollama-chat_expression.h"
+#include "mod-ollama-chat_text.h"
 
 #include <algorithm>
 #include <cctype>
@@ -8,24 +9,14 @@
 #include <string>
 #include <vector>
 
+// Trim, IsSentenceEnd, CountWords and the three length guards moved to mod-ollama-chat_text.cpp, which
+// carries no project headers and so can be compiled and tested on its own (plans/35 §6). Everything left
+// in this file needs the config PODs or expression.h behind it.
+using OllamaText::IsSpace;
+using OllamaText::Trim;
+
 namespace
 {
-    inline bool IsSpace(unsigned char c)
-    {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-    }
-
-    std::string Trim(const std::string& s)
-    {
-        size_t start = 0;
-        size_t end = s.size();
-        while (start < end && IsSpace(static_cast<unsigned char>(s[start])))
-            ++start;
-        while (end > start && IsSpace(static_cast<unsigned char>(s[end - 1])))
-            --end;
-        return s.substr(start, end - start);
-    }
-
     // Decode one UTF-8 sequence at position i. Advances i past it.
     // Returns the codepoint, or 0xFFFD for malformed input (advancing by 1).
     uint32_t DecodeUtf8(const std::string& s, size_t& i, size_t& seqLen)
@@ -335,71 +326,6 @@ std::string StripDecorativeUnicode(const std::string& text)
     return out;
 }
 
-std::string ClampReplyLength(const std::string& text, uint32_t maxLen)
-{
-    if (maxLen == 0 || text.size() <= maxLen)
-        return text;
-
-    // Back off to a UTF-8 boundary at or before maxLen.
-    size_t cut = maxLen;
-    while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
-        --cut;
-
-    std::string head = text.substr(0, cut);
-
-    // Prefer ending on a complete sentence if one lands in the last third.
-    const size_t minSentence = head.size() > 40 ? head.size() * 2 / 3 : 0;
-    size_t bestSentence = std::string::npos;
-    for (size_t i = head.size(); i > minSentence; --i)
-    {
-        const char c = head[i - 1];
-        if (c == '.' || c == '!' || c == '?')
-        {
-            bestSentence = i;
-            break;
-        }
-    }
-    if (bestSentence != std::string::npos)
-        return Trim(head.substr(0, bestSentence));
-
-    // Otherwise cut at the last word boundary so we never truncate mid-word.
-    size_t lastSpace = head.find_last_of(' ');
-    if (lastSpace != std::string::npos && lastSpace > head.size() / 2)
-        head.erase(lastSpace);
-
-    return Trim(head);
-}
-
-namespace
-{
-    bool IsSentenceEnd(const std::string& s, size_t i)
-    {
-        // i indexes a '.', '!' or '?'; a sentence ends there if the next character is space, a closing
-        // quote or the end of the text. Keeps "St. Alia" style abbreviations from counting mid-word.
-        const char c = s[i];
-        if (c != '.' && c != '!' && c != '?')
-            return false;
-        if (i + 1 >= s.size())
-            return true;
-        const char n = s[i + 1];
-        return n == ' ' || n == '"' || n == '\'' || n == ')';
-    }
-
-    size_t CountWords(const std::string& s, size_t from, size_t to)
-    {
-        size_t words = 0;
-        bool inWord = false;
-        for (size_t i = from; i < to && i < s.size(); ++i)
-        {
-            const bool space = std::isspace(static_cast<unsigned char>(s[i])) != 0;
-            if (!space && !inWord)
-                ++words;
-            inWord = !space;
-        }
-        return words;
-    }
-}
-
 uint32_t TakeWordCap(std::string& text)
 {
     const size_t at = text.find_last_of('@');
@@ -413,84 +339,6 @@ uint32_t TakeWordCap(std::string& text)
     catch (const std::exception&) { return 0; }
     text = Trim(text.substr(0, at));
     return cap;
-}
-
-std::string ClampReplyWords(const std::string& text, uint32_t maxWords)
-{
-    if (maxWords == 0 || CountWords(text, 0, text.size()) <= maxWords)
-        return text;
-
-    // Whole sentences while they fit.
-    size_t keep = 0;
-    for (size_t i = 0; i < text.size(); ++i)
-    {
-        if (!IsSentenceEnd(text, i))
-            continue;
-        size_t end = i + 1;
-        while (end < text.size() && (text[end] == '"' || text[end] == '\'' || text[end] == ')'))
-            ++end;
-        if (CountWords(text, 0, end) > maxWords)
-            break;
-        keep = end;
-    }
-    if (keep > 0)
-        return Trim(text.substr(0, keep));
-
-    // The first sentence alone overruns: end it at the last clause break inside the cap.
-    size_t words = 0, capEnd = text.size();
-    bool inWord = false;
-    for (size_t i = 0; i < text.size(); ++i)
-    {
-        const bool space = std::isspace(static_cast<unsigned char>(text[i])) != 0;
-        if (!space && !inWord && ++words > maxWords)
-        {
-            capEnd = i;
-            break;
-        }
-        inWord = !space;
-    }
-    // Commas and semicolons only: after unicode folding a dash may sit inside a word ("stone-mace") as
-    // easily as between clauses, and cutting there leaves half a word.
-    const size_t brk = text.substr(0, capEnd).find_last_of(",;");
-    if (brk == std::string::npos || CountWords(text, 0, brk) < 3)
-    {
-        // No clause to stop at: the whole first sentence is better than a broken one.
-        for (size_t i = 0; i < text.size(); ++i)
-            if (IsSentenceEnd(text, i))
-                return Trim(text.substr(0, i + 1));
-        return text;
-    }
-    std::string head = Trim(text.substr(0, brk));
-    while (!head.empty() && (head.back() == '-' || head.back() == ' '))
-        head.pop_back();
-    return head.empty() ? text : head + ".";
-}
-
-std::string DropUnfinishedTail(const std::string& text)
-{
-    std::string s = Trim(text);
-    if (s.empty())
-        return s;
-    char last = s.back();
-    size_t tail = s.size();
-    while (tail > 0 && (s[tail - 1] == '"' || s[tail - 1] == '\'' || s[tail - 1] == ')'))
-        --tail;
-    if (tail > 0)
-        last = s[tail - 1];
-    if (last == '.' || last == '!' || last == '?')
-        return s;
-
-    for (size_t i = s.size(); i-- > 0; )
-    {
-        if (IsSentenceEnd(s, i))
-        {
-            size_t end = i + 1;
-            while (end < s.size() && (s[end] == '"' || s[end] == '\'' || s[end] == ')'))
-                ++end;
-            return Trim(s.substr(0, end));
-        }
-    }
-    return s;
 }
 
 // --------------------------------------------------------------------------

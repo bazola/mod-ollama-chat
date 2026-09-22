@@ -706,6 +706,28 @@ OllamaChat.Holder.TurnBonusSeconds = 5
 #   Default:     45
 OllamaChat.Holder.MaxBonusSeconds = 45
 
+# OllamaChat.Addressee.LogDecisions
+#   Description: Write one line to the server log for every decision this pass
+#                makes: which case it took (named, holder, group, random,
+#                invented, fallback), who held the thread, who was chosen, and
+#                how many actually spoke.
+#
+#                Separate from DebugEnabled deliberately. The check plan 25 §29
+#                asks for -- counting the unnamed follow-ups that went to a bot
+#                the person was not talking to, 11 of 21 before this resolver --
+#                cannot be run from the chat ledger any more: once companies
+#                hold conversations unattended, a day carries thousands of
+#                ambient lines, so "the bot who spoke just before" is a random
+#                remark rather than the one being answered, and the pairing
+#                measures chat density instead of routing. Measured 2026-09-22:
+#                the same query reads 23% on a quiet day and 96% on a busy one
+#                with no code change between them.
+#
+#                One line per routed message, where DebugEnabled writes the
+#                whole stream and is unreadable over a dungeon run.
+#   Default:     0
+OllamaChat.Addressee.LogDecisions = 0
+
 # OllamaChat.Initiate.Enable
 #   Description: Let a bot START something (plan 25 item 40). Ambient chatter
 #                already picks topics ABOUT nearby people -- it resolved a live

@@ -632,11 +632,26 @@ namespace
         if (line.empty() || line == "[Format Error]")
             return;
 
-        // The emote follows the line it defers to instead of racing ahead of
-        // it. If that speaker has already been heard here -- this answer came
-        // back late, or their reply was unusually quick -- there is nothing
-        // left to wait for.
-        if (SpokeRecently(h.scopeKey, h.speakerName))
+        // Zero means fire now, ahead of the line it defers to (plan 25 item 71).
+        // The operator played both orders and prefers this one: the emote first
+        // announces that someone is about to speak, which reads as suspense,
+        // where the deferred order explains a silence after the fact. A switch
+        // rather than a revert, so both stay reachable between sessions without
+        // a build.
+        //
+        // Checked here, ahead of both branches below, because each uses this
+        // same value as its window: at zero SpokeRecently can only be true
+        // within the same second, and giveUpAt would fall due on the very next
+        // tick, so falling through would drop the emote rather than hurry it.
+        if (g_HeldTongueEmoteWaitSeconds == 0)
+        {
+            EmitHeldTongue(h.botGuid, line);
+        }
+        // Otherwise the emote follows the line it defers to instead of racing
+        // ahead of it. If that speaker has already been heard here -- this
+        // answer came back late, or their reply was unusually quick -- there is
+        // nothing left to wait for.
+        else if (SpokeRecently(h.scopeKey, h.speakerName))
         {
             EmitHeldTongue(h.botGuid, line);
         }
@@ -799,6 +814,9 @@ namespace
         // How many of `speakers` may actually speak. 0 means all of them.
         uint32_t speakerCap = 0;
 
+        // Which of the cases this line took, for the decision log below.
+        const char* branch = "fallback";
+
         if (!parsed)
         {
             takeAll();
@@ -826,6 +844,7 @@ namespace
             std::uniform_int_distribution<uint32_t> howMany(low, cap);
 
             speakerCap = howMany(gen);
+            branch     = "group";
         }
         else if (named.empty())
         {
@@ -840,16 +859,19 @@ namespace
             if (holderIdx != SIZE_MAX)
             {
                 speakers.push_back(holderIdx);
+                branch = "holder";
             }
             else if (!a.candidateGuids.empty())
             {
                 std::uniform_int_distribution<size_t> pick(0, a.candidateGuids.size() - 1);
                 speakers.push_back(pick(gen));
+                branch = "random";
             }
         }
         else
         {
             speakerCap = a.maxSpeakers;
+            branch     = "named";
 
             for (const std::string& want : named)
             {
@@ -870,7 +892,10 @@ namespace
 
             // Every name it gave was invented. Treat that as no answer at all.
             if (speakers.empty())
+            {
                 takeAll();
+                branch = "invented";
+            }
         }
 
         uint32_t            spoken = 0;
@@ -903,6 +928,34 @@ namespace
                 if (speakerCap > 0 && spoken >= speakerCap)
                     break;
             }
+        }
+
+        // One line per decision, so a session can be read back afterwards and
+        // the cases counted. This is what plan 25 §29's check needs and what the
+        // chat ledger cannot give: once companies talk among themselves, "the
+        // bot who spoke just before" is an ambient remark rather than the line
+        // being answered, and the pairing measures chat density instead of
+        // routing. Here the routing says what it did.
+        if (g_AddresseeLogDecisions)
+        {
+            std::string chose;
+            for (size_t idx : speakers)
+            {
+                if (idx >= a.candidateNames.size())
+                    continue;
+                if (!chose.empty())
+                    chose += ",";
+                chose += a.candidateNames[idx];
+            }
+
+            LOG_INFO("module.ollamachat",
+                     "[Ollama Chat] addressee: branch={} sender={} holder={} candidates={} "
+                     "chose={} spoke={} cap={}",
+                     branch, sender->GetName(),
+                     a.holderName.empty() ? std::string("-") : a.holderName,
+                     a.candidateGuids.size(),
+                     chose.empty() ? std::string("-") : chose,
+                     spoken, speakerCap);
         }
 
         // The one bot this pass chose was refused by the governor -- a cooldown,

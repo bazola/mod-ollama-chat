@@ -195,6 +195,7 @@ uint32_t    g_AddresseeGroupStaggerMs = 1800;
 uint32_t    g_HolderWindowSeconds     = 45;
 uint32_t    g_HolderTurnBonusSeconds  = 5;
 uint32_t    g_HolderMaxBonusSeconds   = 45;
+bool        g_AddresseeLogDecisions   = false;
 bool        g_InitiateEnable          = false;
 uint32_t    g_InitiateChance          = 25;
 std::string g_InitiateDirective;
@@ -1124,6 +1125,11 @@ void LoadOllamaChatConfig()
     g_HolderWindowSeconds     = sConfigMgr->GetOption<uint32_t>("OllamaChat.Holder.WindowSeconds", 45);
     g_HolderTurnBonusSeconds  = sConfigMgr->GetOption<uint32_t>("OllamaChat.Holder.TurnBonusSeconds", 5);
     g_HolderMaxBonusSeconds   = sConfigMgr->GetOption<uint32_t>("OllamaChat.Holder.MaxBonusSeconds", 45);
+
+    // The decision log (plan 25 §29's check). Separate from DebugEnabled: the
+    // check wants one line per routed message over a whole session, not the
+    // module's entire debug stream for hours of a dungeon run.
+    g_AddresseeLogDecisions   = sConfigMgr->GetOption<bool>("OllamaChat.Addressee.LogDecisions", false);
     // Braces that are part of the JSON, not a placeholder, must be doubled:
     // SafeFormat is fmt::vformat, so a bare { opens a format field and the whole
     // template comes back as the literal string "[Format Error]".

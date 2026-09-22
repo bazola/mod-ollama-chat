@@ -307,6 +307,12 @@ extern uint32_t    g_HolderWindowSeconds;
 extern uint32_t    g_HolderTurnBonusSeconds;
 extern uint32_t    g_HolderMaxBonusSeconds;
 
+// One log line per decision this pass makes (plan 25 §29's check): which case
+// it took, who held the thread, who was chosen. Kept apart from DebugEnabled
+// because the check reads a whole session and the debug stream is unreadable
+// at that length.
+extern bool        g_AddresseeLogDecisions;
+
 // Bots starting something (plan 25 item 40). An ambient line about a person can
 // be aimed AT that person instead of at the room: naming them short-circuits the
 // candidate scan and counts as direct address, so they answer, and promptly.

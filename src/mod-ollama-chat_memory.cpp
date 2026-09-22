@@ -650,8 +650,12 @@ void Memory_LoadCompanions()
         std::lock_guard<std::mutex> lock(g_CompanionMutex);
         g_Companions = std::move(found);
     }
+    // Says which mode is actually live, because the count alone reads as a restriction even when the
+    // restriction is off, and this line is the only thing anyone has to check it by.
     LOG_INFO("module.ollamachat",
-             "[Ollama Chat] {} bots have travelled with a person; only they keep deed memories.", n);
+             "[Ollama Chat] {} bots have travelled with a person; deed memories are {}.",
+             n, g_MemoryEventCompanionsOnly ? "kept by them alone"
+                                            : "kept by every bot in the world");
 }
 
 

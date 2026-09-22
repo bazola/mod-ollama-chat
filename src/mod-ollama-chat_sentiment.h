@@ -86,7 +86,7 @@ void InitializeSentimentTracking();
 // OllamaChat.Regard.RefreshSeconds. Cheap when disabled.
 void Regard_Tick(uint32 diff);
 
-// "How you feel about <the player>: you dislike and distrust them. <their own sentence>"
+// "How you feel about <name>: you dislike and distrust them. <their own sentence>"
 // Empty when disabled or when the bot has no strong feeling about them.
 std::string Regard_WordsFor(Player* bot, Player* other);
 

@@ -281,7 +281,7 @@ void InitializeSentimentTracking()
 // Regard (local patch, plan 14)
 // --------------------------------------------------------------------------
 // How a bot feels about each person it has dealt with, player or bot. Scored
-// outside the worldserver by /opt/wow/regard/regard.py into `regard`; this side
+// outside the worldserver by the regard service (services/regard/regard.py) into `regard`; this side
 // only reads. The table is loaded on a background thread and swapped in whole,
 // so building a prompt costs a mutex and a map lookup.
 

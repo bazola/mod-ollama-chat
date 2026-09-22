@@ -611,9 +611,9 @@ namespace
 
         // And never keep a parrot. Asked what it swallowed, a model will sometimes answer by repeating the
         // line that prompted the question, and that sentence then sits in the bot's memory until it says it
-        // back to the person who said it first. Traced on 2026-09-20: <the player> said "The silence is
-        // temporary, the sounds of battle will ring out too"; Bazola stored it verbatim at 15:23:30 and
-        // said it back to him at 15:47:47, then again eight seconds later.
+        // back to the person who said it first. Traced on 2026-09-20: a player said "The silence is
+        // temporary, the sounds of battle will ring out too"; a bot stored it verbatim at 15:23:30 and
+        // said it back to them at 15:47:47, then again eight seconds later.
         if (IsEcho(thought, h.message))
             return;
 

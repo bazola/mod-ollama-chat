@@ -389,7 +389,7 @@ extern uint32_t    g_RelationshipMentionThreshold;
 extern uint32_t    g_RelationshipMaxPerPrompt;
 
 // Regard (local patch, plan 14): how bots feel about people, scored outside the
-// worldserver by /opt/wow/regard/regard.py into the `regard` table.
+// worldserver by the regard service (services/regard/regard.py) into the `regard` table.
 extern bool        g_RegardEnable;
 extern uint32_t    g_RegardRefreshSeconds;
 extern uint32_t    g_RegardMaxPerPrompt;

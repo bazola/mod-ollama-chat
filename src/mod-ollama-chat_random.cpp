@@ -48,16 +48,19 @@ namespace
     }
 
     // Decide where an ambient line would go, before spending an LLM call on it.
-    // A company of bots that is really together: in one group, nobody real in it, and at least one
-    // companion close enough to be spoken to. Without the distance test a "party" spread over a continent
-    // would talk to itself (plans/31 §19).
-    bool BotOnlyCompanyTogether(Player* bot)
+    // An all-bot company of two or more with a living companion in it. There is deliberately no distance
+    // test: CHAT_MSG_PARTY is rangeless in 3.3.5 (ChatHandler groups PARTY with the non-positional types),
+    // PlayerbotAI::SayToParty has no distance test, and neither do this module's own three downstream party
+    // gates -- they ask only for GetMembersCount() >= 2. The 30 yd test that used to live here was the lone
+    // positional rule on a rangeless channel, and it left 36 of 46 live companies mute (plans/36 §2).
+    // IsAlive stays: it costs nothing and stops a bot opening a conversation with a corpse.
+    bool BotOnlyCompany(Player* bot)
     {
         Group* group = bot->GetGroup();
         if (!group || group->GetMembersCount() < 2)
             return false;
 
-        bool companionNear = false;
+        bool companionAlive = false;
         for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
         {
             Player* member = ref->GetSource();
@@ -66,10 +69,10 @@ namespace
             PlayerbotAI* memberAI = PlayerbotsMgr::instance().GetPlayerbotAI(member);
             if (!memberAI || !memberAI->IsBotAI())
                 return false;               // somebody real is here; the usual rules apply
-            if (member != bot && member->IsAlive() && bot->IsWithinDistInMap(member, g_SayDistance))
-                companionNear = true;
+            if (member != bot && member->IsAlive())
+                companionAlive = true;
         }
-        return companionNear;
+        return companionAlive;
     }
 
     // Per-company and realm-wide pacing for bot-only party talk, kept apart from the governor's own limits
@@ -121,7 +124,7 @@ namespace
         // qualified for the tick because a guildmate was online could then
         // spend a generation talking to five other bots.
         if (bot->GetGroup() && !g_DisableForParty &&
-            (OllamaGroupHasRealPlayer(bot) || (g_PartyChatterEnable && BotOnlyCompanyTogether(bot))))
+            (OllamaGroupHasRealPlayer(bot) || (g_PartyChatterEnable && BotOnlyCompany(bot))))
         {
             outSource = SRC_PARTY_LOCAL;
             return true;
@@ -399,7 +402,7 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         // companions, and everything it will remember of an outing, has to start with somebody speaking --
         // and until now nothing could, because every path required a person to be standing there. So a
         // realm with nobody logged in produced no talk, no memories and no history at all (plans/31 §19).
-        const bool partyAudience = g_PartyChatterEnable && BotOnlyCompanyTogether(bot);
+        const bool partyAudience = g_PartyChatterEnable && BotOnlyCompany(bot);
 
         if (!guildAudience && !nearRealPlayer && !partyAudience)
             continue;
@@ -478,10 +481,13 @@ void OllamaBotRandomChatter::HandleRandomChatter()
 
         const bool trade = source == SRC_GENERAL_LOCAL && channelId == ChatChannelId::TRADE;
         // Turn this line toward the person it is about, sometimes. Only when the
-        // topic named a live person, only on a roll, and only for a target the
-        // bot can actually be heard by -- a group member may be a continent
-        // away, and a line addressed to someone out of earshot is a line nobody
-        // answers. Speaking to the room stays the default.
+        // topic named a live person, only on a roll, and -- on the channels that
+        // actually carry distance -- only for a target within earshot. On SAY and
+        // YELL a line addressed to someone out of earshot is a line nobody
+        // answers; on PARTY and RAID the channel has no range at all, and
+        // requiring one here is what kept companies to remarks instead of
+        // conversations (plans/36 §3). Speaking to the room stays the default.
+        const bool positional = source == SRC_SAY_LOCAL || source == SRC_YELL_LOCAL;
         uint64_t    initiateGuid = 0;
         std::string initiateName;
         if (g_InitiateEnable && topic.targetGuid != 0 && !topic.targetName.empty() &&
@@ -489,7 +495,7 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         {
             Player* target = ObjectAccessor::FindConnectedPlayer(ObjectGuid(topic.targetGuid));
             if (target && target->IsInWorld() && target->IsAlive() &&
-                bot->IsWithinDistInMap(target, g_SayDistance))
+                (!positional || bot->IsWithinDistInMap(target, g_SayDistance)))
             {
                 initiateGuid = topic.targetGuid;
                 initiateName = topic.targetName;

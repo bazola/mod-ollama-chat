@@ -86,6 +86,24 @@ namespace
 
         // Player guid -> the bot they are mid-exchange with here.
         std::unordered_map<uint64_t, ThreadHolder> holders;
+
+        // The staleness end condition (plan 25 item 62's build half). A chain
+        // that has stopped saying anything new should end, and until now
+        // nothing could end one: repetition suppressed the offending LINE and
+        // the next bot simply tried again, so the exchange decayed into echo
+        // instead of concluding -- measured 41 runs of three or more lines, the
+        // longest nine over twelve minutes.
+        //
+        // `staleHits` counts consecutive lines here that said nothing new;
+        // anything new resets it. At the threshold `staleUntil` is set and
+        // bot-to-bot replies in this scope stop until it passes. Ambient and
+        // event lines are deliberately NOT gated: they seed at chainDepth 0 and
+        // a genuinely new subject is exactly what should be allowed to follow a
+        // dead one. The player is never consulted -- the end condition is
+        // staleness only, decided 2026-09-18 (§38 Q1), because ending on a
+        // person's departure would restore the audience brake by another name.
+        uint32_t  staleHits = 0;
+        TimePoint staleUntil{};
     };
 
     std::unordered_map<uint64_t, BotState>    g_bots;
@@ -383,6 +401,32 @@ bool Governor_ChainDepthAllowed(uint8_t depth)
     std::lock_guard<std::mutex> lock(g_mutex);
     ++g_stats.blockedChainDepth;
     return false;
+}
+
+// --- the staleness end condition ------------------------------------------
+//
+// The mark itself is taken in Governor_RecordUtterance, where the candidate's
+// tokens and grams are already built and where every recorded line passes. This
+// is only the reader.
+
+bool Governor_ScopeIsStale(const std::string& scopeKey)
+{
+    if (g_StaleChainHits == 0)
+        return false;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+
+    auto it = g_scopes.find(scopeKey);
+    if (it == g_scopes.end())
+        return false;
+
+    if (it->second.staleUntil.time_since_epoch().count() == 0)
+        return false;
+    if (Clock::now() >= it->second.staleUntil)
+        return false;
+
+    ++g_stats.blockedStale;
+    return true;
 }
 
 uint32_t Governor_ApplyChainDecay(uint32_t baseChancePct, uint8_t depth)
@@ -727,6 +771,61 @@ void Governor_RecordUtterance(ObjectGuid botGuid, const std::string& scopeKey,
     TrimHistory(bot.history, g_BotHistorySize);
 
     ScopeState& scope = g_scopes[scopeKey];
+
+    // Did this line say anything new here? (Plan 25 item 62, the end
+    // condition.) Scored against the scope's history as it stands, BEFORE this
+    // utterance joins it -- compare after and every line matches itself, so
+    // every conversation would read as stale on its first line.
+    //
+    // Scope history only, never the bot's own. One bot repeating itself is the
+    // tic that Governor_StripRepeatedSentences and the opener check already
+    // answer; it must not end the conversation everyone else is having.
+    //
+    // Judged here rather than at the repetition check because that one is
+    // skipped for direct address, and in a party of eight or fewer every line
+    // is direct address -- the party the operator actually plays in is exactly
+    // where the echo was measured, so a signal taken from there would have been
+    // blind to it. This function is called for every line that is recorded.
+    if (g_StaleChainHits > 0)
+    {
+        bool saidSomethingNew = true;
+
+        for (const auto& prev : scope.history)
+        {
+            if (SecondsSince(prev.when, u.when) > double(g_RepetitionWindowSeconds))
+                continue;
+
+            // Same cheap length reject the repetition scorer uses: lines of
+            // wildly different length cannot be near-duplicates.
+            const size_t la = u.normalized.size(), lb = prev.normalized.size();
+            const size_t lo = la < lb ? la : lb, hi = la < lb ? lb : la;
+            if (hi > 0 && double(lo) / double(hi) < 0.4)
+                continue;
+
+            if (prev.normalized == u.normalized ||
+                JaccardOf(u.tokens, prev.tokens) >= g_RepetitionSimilarityThreshold ||
+                CosineOf(u.grams, u.gramNorm, prev.grams, prev.gramNorm) >=
+                    g_RepetitionSimilarityThreshold)
+            {
+                saidSomethingNew = false;
+                break;
+            }
+        }
+
+        if (saidSomethingNew)
+        {
+            scope.staleHits = 0;              // the chain has somewhere to go
+        }
+        else if (++scope.staleHits >= g_StaleChainHits)
+        {
+            // Ended. The window is what stops the next ambient line re-opening
+            // the exchange that just died: a new subject may start one, but not
+            // instantly, and not off the back of the line that said nothing.
+            scope.staleHits  = 0;
+            scope.staleUntil = u.when + std::chrono::seconds(g_StaleQuietSeconds);
+        }
+    }
+
     scope.history.push_back(std::move(u));
     TrimHistory(scope.history, g_ScopeHistorySize);
 }
@@ -937,8 +1036,19 @@ void Governor_Update()
                       ? s.holders.erase(hit)
                       : std::next(hit);
 
+        // An expired quiet window is dead weight, and a scope holding one must
+        // not be pruned while it still has force -- dropping it would silently
+        // re-open the exchange it just ended.
+        const bool quietLive = s.staleUntil.time_since_epoch().count() != 0 &&
+                               now < s.staleUntil;
+        if (!quietLive)
+        {
+            s.staleUntil = TimePoint{};
+            s.staleHits  = 0;
+        }
+
         const bool idle = s.history.empty() && s.sendTimes.empty() &&
-                          s.holders.empty() &&
+                          s.holders.empty() && !quietLive &&
                           SecondsSince(s.lastHuman, now) > staleAfter &&
                           SecondsSince(s.lastSend, now)  > staleAfter;
 

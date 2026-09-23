@@ -1456,6 +1456,36 @@ OllamaChat.BotConversation.RequireRecentHuman = 1
 #        Default: 120
 OllamaChat.BotConversation.HumanWindowSeconds = 120
 
+#    OllamaChat.BotConversation.StaleChainHits
+#        How many consecutive lines in one channel that say NOTHING NEW end the
+#        exchange there. Novelty is scored against that channel's recent history
+#        with the same similarity thresholds the repetition checks use, so there
+#        is one notion of "new" rather than two.
+#
+#        This is the only brake that can end a conversation rather than merely
+#        bound it. Depth and decay limit how far a chain runs from one seed, but
+#        ambient and event lines both seed at depth 0, so a chain can re-seed
+#        indefinitely -- measured, 41 runs of three or more lines with the player
+#        silent, the longest nine lines over twelve minutes, decaying into echo:
+#        "The road is heavy today" answered by "The road is heavy. I am thin."
+#
+#        Only bot-to-bot replies are refused afterwards. Ambient and event
+#        chatter may still raise something new there, because a new subject is
+#        exactly what should be allowed to follow a dead one. A real player's
+#        presence is never consulted: ending on someone's departure would restore
+#        the audience rule above by another name.
+#
+#        0 disables the end condition entirely.
+#        Default: 2
+OllamaChat.BotConversation.StaleChainHits = 2
+
+#    OllamaChat.BotConversation.StaleQuietSeconds
+#        How long bots stop answering each other in a channel after the exchange
+#        there was ended as stale. Long enough that the next ambient line cannot
+#        instantly re-open the exchange that just died.
+#        Default: 120
+OllamaChat.BotConversation.StaleQuietSeconds = 120
+
 #    OllamaChat.Cooldown.PerBotSeconds
 #        Minimum gap between two lines from the same bot. This paces ambient
 #        chatter and is deliberately skipped for direct address -- see

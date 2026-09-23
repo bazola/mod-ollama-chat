@@ -118,6 +118,8 @@ bool     g_ResponseStripDecorativeUnicode = true;
 // --------------------------------------------
 uint8_t  g_MaxChainDepth                 = 3;
 uint32_t g_ChainChanceDecayPct           = 50;
+uint32_t g_StaleChainHits                = 2;
+uint32_t g_StaleQuietSeconds             = 120;
 bool     g_RequireRecentHuman            = true;
 uint32_t g_HumanWindowSeconds            = 120;
 uint32_t g_BotCooldownSeconds            = 45;
@@ -819,6 +821,12 @@ void LoadOllamaChatConfig()
     // --- Conversation governor -------------------------------------------
     g_MaxChainDepth                   = static_cast<uint8_t>(sConfigMgr->GetOption<uint32_t>("OllamaChat.BotConversation.MaxChainDepth", 3));
     g_ChainChanceDecayPct             = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotConversation.ChanceDecayPct", 50);
+    // The staleness end condition (plan 25 item 62). Defaults on: with the
+    // audience brake deliberately off, this is the only thing that can end a
+    // chain at all, and the measured failure it answers -- nine lines of echo
+    // over twelve minutes -- is not a rare case.
+    g_StaleChainHits                  = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotConversation.StaleChainHits", 2);
+    g_StaleQuietSeconds               = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotConversation.StaleQuietSeconds", 120);
     g_RequireRecentHuman              = sConfigMgr->GetOption<bool>("OllamaChat.BotConversation.RequireRecentHuman", true);
     g_HumanWindowSeconds              = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotConversation.HumanWindowSeconds", 120);
     g_BotCooldownSeconds              = sConfigMgr->GetOption<uint32_t>("OllamaChat.Cooldown.PerBotSeconds", 45);

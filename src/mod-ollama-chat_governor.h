@@ -39,6 +39,29 @@ bool Governor_HasRecentHuman(const std::string& scopeKey);
 bool     Governor_ChainDepthAllowed(uint8_t depth);
 uint32_t Governor_ApplyChainDecay(uint32_t baseChancePct, uint8_t depth);
 
+// --- the staleness end condition (plan 25 item 62) ------------------------
+//
+// Depth and decay bound how FAR a chain runs from one seed; neither can end a
+// chain that keeps being re-seeded, and ambient and event lines both seed at
+// depth 0. So a conversation could decay into echo indefinitely: repetition
+// suppressed the offending line, the next bot tried again, and nothing ever
+// concluded that the exchange was over.
+//
+// Whether a line said anything new is judged inside Governor_RecordUtterance,
+// against that scope's history and with the same similarity scoring the
+// repetition checks use -- one notion of "new" in the module rather than two.
+// Consecutive lines that say nothing new end the chain; anything new resets the
+// count. It is taken there, and not at Governor_IsRepetitive, because that check
+// is skipped for direct address and in a party of eight or fewer every line is
+// direct address -- which is precisely the party the echo was measured in.
+//
+// Only bot-to-bot replies are refused afterwards. Ambient and event chatter
+// stays allowed on purpose: a genuinely new subject is what should follow a dead
+// one, and silencing the scope outright would restore the audience brake the
+// operator deliberately switched off (§38 Q1). The player's presence is never
+// consulted, for the same reason.
+bool Governor_ScopeIsStale(const std::string& scopeKey);
+
 // --- open conversations ---------------------------------------------------
 
 // A bot that has already answered someone is in a conversation with them, and
@@ -171,6 +194,7 @@ struct GovernorStats
     uint32_t blockedRepetition;
     uint32_t blockedChainDepth;
     uint32_t blockedNoAudience;
+    uint32_t blockedStale;
 };
 GovernorStats Governor_GetStats();
 

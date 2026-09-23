@@ -493,9 +493,9 @@ bool OllamaChatConfigCommand::HandleOllamaStatusCommand(ChatHandler* handler)
 
     handler->PSendSysMessage("Governor: {} bots, {} scopes tracked, {} sends in the last minute",
                              gov.trackedBots, gov.trackedScopes, gov.sendsLastMinute);
-    handler->PSendSysMessage("Blocked: {} cooldown, {} rate, {} repetition, {} chain-depth, {} no-audience",
+    handler->PSendSysMessage("Blocked: {} cooldown, {} rate, {} repetition, {} chain-depth, {} no-audience, {} stale",
                              gov.blockedCooldown, gov.blockedRate, gov.blockedRepetition,
-                             gov.blockedChainDepth, gov.blockedNoAudience);
+                             gov.blockedChainDepth, gov.blockedNoAudience, gov.blockedStale);
 
     handler->PSendSysMessage("Roleplay: {} (strictness {})   Emote reactions: {}",
                              g_RoleplayEnable ? "on" : "off",

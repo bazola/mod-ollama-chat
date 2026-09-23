@@ -1454,6 +1454,27 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                          "bots will not talk among themselves here.", scopeKey);
             return;
         }
+
+        // A third brake, and with the audience rule deliberately off it is the
+        // only one that can actually END a conversation (plan 25 item 62).
+        // Depth and decay bound how far a chain runs from one seed; neither can
+        // stop a chain that keeps being re-seeded, and both ambient and event
+        // lines seed at depth 0 -- which is why 41 of 352 runs reached three or
+        // more lines and the longest ran nine over twelve minutes, decaying into
+        // echo: "The road is heavy today" answered by "The road is heavy. I am
+        // thin."
+        //
+        // Refused here only, on the bot-to-bot path. Ambient and event chatter
+        // may still raise something new in this scope; what may not happen is
+        // another bot answering a line that said nothing.
+        if (Governor_ScopeIsStale(scopeKey))
+        {
+            if (g_DebugEnabled)
+                LOG_INFO("module.ollamachat",
+                         "[Ollama Chat] The exchange in {} has stopped saying anything new; "
+                         "bots will not answer each other here until it has rested.", scopeKey);
+            return;
+        }
     }
     
     // One pass over the online players, reused by every eligibility test

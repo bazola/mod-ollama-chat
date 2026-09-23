@@ -192,6 +192,11 @@ extern bool     g_ResponseStripDecorativeUnicode;
 // --------------------------------------------
 extern uint8_t  g_MaxChainDepth;
 extern uint32_t g_ChainChanceDecayPct;
+// How many consecutive lines that say nothing new end a chain, and how long
+// bot-to-bot replies then stop in that scope. 0 hits disables the end
+// condition; depth and decay alone cannot end a chain that keeps re-seeding.
+extern uint32_t g_StaleChainHits;
+extern uint32_t g_StaleQuietSeconds;
 extern bool     g_RequireRecentHuman;
 extern uint32_t g_HumanWindowSeconds;
 extern uint32_t g_BotCooldownSeconds;

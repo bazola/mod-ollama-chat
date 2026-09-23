@@ -141,12 +141,20 @@ namespace
     // this realm and a dungeon's elites are its trash, so a rank alone is no
     // signal. A boss, a death, a task finished, a prize taken, a person cut
     // down -- those are the things anyone would still be telling afterwards.
+    //
+    // And deliberately NOT g_EventTypeAchievement, as of plans/44 §5. An achievement is not a deed; it is
+    // a notice ABOUT deeds, and a dungeon-clear one fires in the same second as the final boss dies, once
+    // per party member. Five near-identical "X earned recognition for Gnomeregan" lines then crowd the
+    // single boss line out of a digest that writes three to five notes -- which is why Thermaplugg, Bazil
+    // Thredd and Edwin VanCleef are the only bosses this realm has ever failed to remember, and why the
+    // notes that replaced them invented a story ("<the player> joined the ranks of the mad"). The dispatch is
+    // gone too (see ChatOnAchievement below); this is the second half of the same fix.
     bool IsMemorableEvent(const std::string& type)
     {
         return type == g_EventTypeDefeatedBoss   || type == g_EventTypeDied ||
                type == g_EventTypeCompletedQuest || type == g_EventTypeDefeatedPlayer ||
                type == g_EventTypeGotItem        || type == g_EventTypeLeveledUp ||
-               type == g_EventTypeWonDuel        || type == g_EventTypeAchievement;
+               type == g_EventTypeWonDuel;
     }
 
     // Where this happened, told the way a person would tell it: the dungeon's
@@ -532,7 +540,12 @@ void ChatOnLoot::OnPlayerStoreNewItem(Player* player, Item* item, uint32 /*count
 
     ItemTemplate const* tmpl = item->GetTemplate();
 
-    if (tmpl->Quality >= ITEM_QUALITY_UNCOMMON)
+    // Blue or better (plans/44 §11). This was UNCOMMON, and because the memory is seeded above the chance
+    // roll, EventTypeGotItem_Chance never governed it: every green a party picked up became a deed in every
+    // nearby bot's buffer. Measured on the Gnomeregan night: 300 of 890 buffered deeds were prizes, and 85
+    // of the party's 199 memories were loot announcements -- 62 of them about what the player looted. That
+    // is the mass a boss kill has to compete with inside one digest.
+    if (tmpl->Quality >= ITEM_QUALITY_RARE)
         eventChatter.DispatchGameEvent(player, g_EventTypeGotItem, tmpl->Name1);
 
     if (!player->GetGuild() || !g_EnableGuildEventChatter)
@@ -665,19 +678,21 @@ void ChatOnLevelUp::OnPlayerLevelChanged(Player* player, uint8 /*oldLevel*/)
 ChatOnAchievement::ChatOnAchievement()
     : PlayerScript("ChatOnAchievement", { PLAYERHOOK_ON_ACHI_COMPLETE }) { }
 
-void ChatOnAchievement::OnPlayerAchievementComplete(Player* player, AchievementEntry const* achievement)
+void ChatOnAchievement::OnPlayerAchievementComplete(Player* /*player*/, AchievementEntry const* /*achievement*/)
 {
-    if (!player || !achievement || !achievement->name[0])
-        return;
-
-    eventChatter.DispatchGameEvent(player, g_EventTypeAchievement, achievement->name[0]);
-
-    if (player->GetGuild() && g_EnableGuildEventChatter &&
-        !g_GuildEventTypeGuildAchievement.empty() &&
-        OllamaIsRealPlayer(player))
-    {
-        eventChatter.DispatchGameEvent(player, g_GuildEventTypeGuildAchievement, achievement->name[0]);
-    }
+    // Achievements are no longer hooked into the chat system at all -- the operator's ruling, plans/44 §11.
+    //
+    // Setting EventTypeAchievement_Chance to 0 would NOT have done this: the witnessed-event memory is
+    // seeded above the chance roll (DispatchGameEvent, deliberately), so a silenced achievement still
+    // filled every nearby bot's deed buffer. The collision it caused is written up in plans/44 §5.
+    //
+    // An achievement is also the one event type with no in-world referent: "earned recognition for
+    // Gnomeregan" is the game talking about itself, which is exactly what the system prompt tells these
+    // characters they know nothing of.
+    //
+    // The hook stays registered and empty on purpose, so that anyone restoring this can see what was here.
+    // Two lines bring it back (the personal and guild dispatches), and the guild announcement went with
+    // them -- it was not the cause, but "at all" was the instruction.
 }
 
 // --------------------------------------------------------------------------

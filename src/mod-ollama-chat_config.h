@@ -67,6 +67,20 @@ extern float       g_OllamaMinP;              // -1 = unset
 extern float       g_OllamaPresencePenalty;   // <= -999 = unset
 extern float       g_OllamaFrequencyPenalty;  // <= -999 = unset
 
+// Per-bot voice jitter (plan 49 item 3c). Every bot in the realm draws from one
+// sampling distribution, so two characters differ only by their prompt. This
+// nudges temperature/top_p by a small amount fixed per character, derived from
+// its guid, which moves the distribution rather than the draw -- a seed would
+// only pin the draw and make a bot repeat itself verbatim (plan 49 §15).
+//
+// Share is the point: only that percentage of the cast is jittered, so the rest
+// is a CONCURRENT CONTROL measurable in the same window. Spoken kinds only;
+// Sentiment and Classify must keep the configured values or their JSON breaks.
+extern bool        g_VoiceJitterEnable;
+extern uint32_t    g_VoiceJitterShare;         // 0-100, percent of the cast jittered
+extern float       g_VoiceJitterTemperature;   // +/- this much
+extern float       g_VoiceJitterTopP;          // +/- this much
+
 // --------------------------------------------
 // Concurrency/Queueing
 // --------------------------------------------

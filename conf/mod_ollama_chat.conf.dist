@@ -156,6 +156,31 @@ OllamaChat.SystemPrompt =
 #     Default:     (empty)
 OllamaChat.Seed =
 
+# OllamaChat.Voice.Jitter
+#     Description: Give each character its own small, fixed offset from the shared sampling
+#                  distribution, derived from its guid (plan 49 item 3c). Moves temperature/top_p,
+#                  not the seed: a fixed seed pins the draw and makes a bot repeat itself verbatim.
+#                  Spoken lines only -- Sentiment and Classify always keep the configured values.
+#     Default:     0
+OllamaChat.Voice.Jitter = 0
+
+# OllamaChat.Voice.JitterShare
+#     Description: Percent of the cast that is jittered, chosen deterministically by guid. The rest
+#                  is left exactly as configured, so it is a control arm measurable in the same
+#                  window. 100 jitters everyone and leaves no control.
+#     Default:     50
+OllamaChat.Voice.JitterShare = 50
+
+# OllamaChat.Voice.JitterTemperature
+#     Description: Maximum amount, plus or minus, that a character's temperature may differ.
+#     Default:     0.06
+OllamaChat.Voice.JitterTemperature = 0.06
+
+# OllamaChat.Voice.JitterTopP
+#     Description: Maximum amount, plus or minus, that a character's top_p may differ.
+#     Default:     0.03
+OllamaChat.Voice.JitterTopP = 0.03
+
 # OllamaChat.MaxConcurrentQueries
 #     Description: The maximum number of concurrent API queries allowed. Use 0 for no limit.
 #     Default:     0

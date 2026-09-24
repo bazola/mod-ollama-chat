@@ -78,7 +78,12 @@ OllamaEndpointSettings OllamaConfig_Snapshot();
 // without thinking if Ollama rejects the request for asking.
 //
 // Blocking. Call from a worker thread, never from the world thread.
-OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind);
+//
+// voiceGuid identifies the character speaking, and is used only to give it its
+// own small, fixed offset from the configured sampling distribution (plan 49
+// item 3c). 0 means "not a character speaking" -- machinery calls leave it out
+// and are never jittered.
+OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, uint64_t voiceGuid = 0);
 
 // Legacy shim: returns the text, or empty on any failure.
 std::string QueryOllamaAPI(const std::string& prompt);

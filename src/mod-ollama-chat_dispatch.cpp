@@ -208,7 +208,9 @@ namespace
 
     void RunChatTask(const Task& task)
     {
-        OllamaApiResult api = QueryOllama(task.request.prompt, task.request.kind);
+        // The speaker's guid rides along so this character can have its own
+        // sampling offset (plan 49 item 3c); it is inert until the conf enables it.
+        OllamaApiResult api = QueryOllama(task.request.prompt, task.request.kind, task.request.botGuid);
 
         if (!api.ok)
         {

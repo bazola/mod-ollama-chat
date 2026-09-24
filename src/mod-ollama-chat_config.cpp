@@ -66,6 +66,13 @@ float       g_OllamaMinP             = -1.0f;
 float       g_OllamaPresencePenalty  = -1000.0f;
 float       g_OllamaFrequencyPenalty = -1000.0f;
 
+// Plan 49 item 3c. Off by default: a rebuild must not change how the realm
+// sounds on its own, so enabling this is a separate conf flip and reload.
+bool        g_VoiceJitterEnable      = false;
+uint32_t    g_VoiceJitterShare       = 50;
+float       g_VoiceJitterTemperature = 0.06f;
+float       g_VoiceJitterTopP        = 0.03f;
+
 // --------------------------------------------
 // Concurrency/Queueing
 // --------------------------------------------
@@ -592,6 +599,11 @@ void LoadOllamaChatConfig()
     g_OllamaStop                      = sConfigMgr->GetOption<std::string>("OllamaChat.Stop", "");
     g_OllamaSystemPrompt              = sConfigMgr->GetOption<std::string>("OllamaChat.SystemPrompt", "");
     g_OllamaSeed                      = sConfigMgr->GetOption<std::string>("OllamaChat.Seed", "");
+
+    g_VoiceJitterEnable               = sConfigMgr->GetOption<bool>("OllamaChat.Voice.Jitter", false);
+    g_VoiceJitterShare                = sConfigMgr->GetOption<uint32_t>("OllamaChat.Voice.JitterShare", 50);
+    g_VoiceJitterTemperature          = sConfigMgr->GetOption<float>("OllamaChat.Voice.JitterTemperature", 0.06f);
+    g_VoiceJitterTopP                 = sConfigMgr->GetOption<float>("OllamaChat.Voice.JitterTopP", 0.03f);
 
     g_MaxConcurrentQueries            = sConfigMgr->GetOption<uint32_t>("OllamaChat.MaxConcurrentQueries", 0);
 

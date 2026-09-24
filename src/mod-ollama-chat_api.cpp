@@ -20,6 +20,55 @@ namespace
     std::mutex             g_settingsMutex;
     OllamaEndpointSettings g_settings;
 
+    // --- per-bot voice jitter (plan 49 item 3c) ---------------------------
+    //
+    // A seed would pin the draw: measured 2026-09-24, the same prompt with a
+    // fixed seed comes back byte for byte, so a per-bot seed would make a
+    // character repeat itself verbatim whenever a prompt recurs. Moving
+    // temperature/top_p instead changes the distribution it samples from,
+    // which is what actually makes two characters sound unalike.
+
+    // splitmix64: one multiply-xor chain, well spread for sequential guids.
+    uint64_t VoiceHash(uint64_t guid)
+    {
+        uint64_t z = guid + 0x9E3779B97F4A7C15ull;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        return z ^ (z >> 31);
+    }
+
+    bool IsSpokenKind(OllamaRequestKind kind)
+    {
+        // Sentiment and Classify are answered in JSON and parsed, never spoken.
+        // Shifting their sampling corrupts the parse for no benefit.
+        return kind == OllamaRequestKind::ChatReply
+            || kind == OllamaRequestKind::RandomChatter
+            || kind == OllamaRequestKind::EventChatter
+            || kind == OllamaRequestKind::RoleplayReply;
+    }
+
+    // Nudges cfg in place. Half the cast (by JitterShare) is left exactly as
+    // configured so it serves as a control arm in the very same window.
+    void ApplyVoiceJitter(OllamaEndpointSettings& cfg, OllamaRequestKind kind, uint64_t voiceGuid)
+    {
+        if (!g_VoiceJitterEnable || voiceGuid == 0 || !IsSpokenKind(kind))
+            return;
+
+        const uint64_t h = VoiceHash(voiceGuid);
+
+        if (g_VoiceJitterShare < 100 && (h % 100u) >= g_VoiceJitterShare)
+            return;   // the control half: untouched on purpose
+
+        // Two independent slices, each mapped to [-1, 1].
+        const double tSpan = ((h >> 8) & 0xFFFFu) / 65535.0 * 2.0 - 1.0;
+        const double pSpan = ((h >> 32) & 0xFFFFu) / 65535.0 * 2.0 - 1.0;
+
+        cfg.temperature = static_cast<float>(
+            std::clamp(cfg.temperature + tSpan * g_VoiceJitterTemperature, 0.10, 2.00));
+        cfg.topP = static_cast<float>(
+            std::clamp(cfg.topP + pSpan * g_VoiceJitterTopP, 0.05, 1.00));
+    }
+
     nlohmann::json BuildRequest(const OllamaEndpointSettings& cfg,
                                 const std::string& prompt,
                                 const OllamaThinkRequest& think,
@@ -242,7 +291,7 @@ OllamaEndpointSettings OllamaConfig_Snapshot()
     return g_settings;
 }
 
-OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind)
+OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, uint64_t voiceGuid)
 {
     OllamaApiResult result;
 
@@ -253,6 +302,11 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind)
     }
 
     OllamaEndpointSettings cfg = OllamaConfig_Snapshot();
+
+    // This character's own small offset from the shared sampling distribution.
+    // Applied to the local copy only, and PerformOnce takes cfg by reference all
+    // the way to BuildRequest, so nothing downstream re-reads the global.
+    ApplyVoiceJitter(cfg, kind, voiceGuid);
 
     // Route to the cheap lane when this kind asks for it and a lane exists.
     // Done here rather than in BuildRequest so the url moves with the model:

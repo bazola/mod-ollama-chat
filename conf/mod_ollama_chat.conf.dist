@@ -287,6 +287,24 @@ OllamaChat.Market.Talk = 0
 OllamaChat.Market.TradeChance = 60
 OllamaChat.Market.Chance = 10
 
+# OllamaChat.Places.Enable
+# OllamaChat.Places.Chance
+# OllamaChat.Places.Era
+#     Description: Local patch (custom wow plan 46). Bots carry one short line about the land they are
+#                  standing in, drawn at random from the four angles held for that zone in place_words --
+#                  written by custom-wow services/lore/gen_places.py from this realm's own ledger, on this
+#                  machine. Nothing about the world ships in the repository, and an absent table is
+#                  silently a no-op. Loaded on the regard thread's timer, but unlike Market and Chronicle
+#                  it does NOT need Regard.Enable: it stands or falls on its own switch, so it can be
+#                  measured while regard is changed. Chance applies to replies as well as chatter -- an
+#                  always-on description becomes wallpaper the model stops reading. Era picks which set of
+#                  rows to load, and must match the realm's era: the same zone before and after a war is
+#                  not the same place.
+#     Default:     0, 30, classic
+OllamaChat.Places.Enable = 0
+OllamaChat.Places.Chance = 30
+OllamaChat.Places.Era = classic
+
 # OllamaChat.BlacklistCommands
 #     Description: A comma-separated list of command prefixes that should be ignored by AI bots.
 #                  If a message starts with any of these prefixes, the bot will not respond.

@@ -104,6 +104,12 @@ std::string Regard_CompanySection(Player* bot, Player* other, bool always);
 // OllamaChat.Chronicle.RumourChance roll. Empty when disabled or nothing is going around.
 std::string Chronicle_RumourSection(Player* bot, bool always);
 
+// The almanac of places (plan 46): one of the four things people say about the land the bot is standing in,
+// from place_words (written by gen_places.py, loaded on the regard thread). Rolls OllamaChat.Places.Chance
+// at every call site -- there is no `always` on purpose -- and is gated only on OllamaChat.Places.Enable,
+// never on Regard.Enable. Empty when disabled, when the zone has no entry, or when the roll fails.
+std::string Place_Section(Player* bot);
+
 // Market talk (plan 17 E.4): one thing people are saying about the market in the city the bot stands in, from
 // market_word (written by market.py, loaded on the regard thread). `trade` rolls OllamaChat.Market.TradeChance
 // (a Trade-channel line), otherwise OllamaChat.Market.Chance. Empty when disabled, outside a market, or no roll.

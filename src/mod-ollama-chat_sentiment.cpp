@@ -11,6 +11,7 @@
 #include <fmt/core.h>
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -556,11 +557,60 @@ namespace
     }
 }
 
+// The almanac of places (plan 46). gen_places.py writes place_words on the operator's own machine, from the
+// operator's own realm: four fragments per zone per era, each on a different angle (sight, danger, people,
+// grievance) rather than four paraphrases. One is drawn at random per prompt, because a single cached
+// description handed identically to every bot in a zone is exactly the shape that put "the dead do not"
+// into 46 mouths (plan 37).
+namespace
+{
+    using PlaceMap = std::unordered_map<uint32_t, std::vector<std::string>>;   // zone id -> its variants
+
+    std::shared_ptr<const PlaceMap> g_PlaceWords;   // guarded by g_RegardMutex
+
+    // The era is a config string that ends up inside a query, so it is cut down to what an era name may
+    // contain before it gets there.
+    std::string EraForSql()
+    {
+        std::string era;
+        for (char c : g_PlacesEra)
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
+                era.push_back(c);
+        return era;
+    }
+
+    void LoadPlaceWords()
+    {
+        if (!TableExists("place_words"))
+            return;
+
+        const std::string era = EraForSql();
+        if (era.empty())
+            return;
+
+        auto places = std::make_shared<PlaceMap>();
+        if (QueryResult result = CharacterDatabase.Query(SafeFormat(
+                "SELECT zone_id, words FROM place_words WHERE era = '{}' ORDER BY zone_id, variant", era)))
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                (*places)[f[0].Get<uint32_t>()].push_back(f[1].Get<std::string>());
+            } while (result->NextRow());
+        }
+
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        g_PlaceWords = std::move(places);
+    }
+}
+
 void Regard_Tick(uint32 diff)
 {
     static uint32 timer = 0;    // 0: load on the first tick after enabling
 
-    if (!g_RegardEnable)
+    // The almanac rides this timer but does not belong to regard, so the tick has to run for places alone
+    // (plan 46 section 5). Everything regard's own switch pays for is gated inside the thread instead.
+    if (!g_RegardEnable && !g_PlacesEnable)
         return;
 
     if (timer > diff)
@@ -576,13 +626,18 @@ void Regard_Tick(uint32 diff)
 
     std::thread([]
     {
-        LoadRegardTable();
-        if (g_RegardCompanyWords)
-            LoadCompanyWords();
-        if (g_ChronicleRumours)
-            LoadRumours();
-        if (g_MarketTalk)
-            LoadMarketWords();
+        if (g_RegardEnable)
+        {
+            LoadRegardTable();
+            if (g_RegardCompanyWords)
+                LoadCompanyWords();
+            if (g_ChronicleRumours)
+                LoadRumours();
+            if (g_MarketTalk)
+                LoadMarketWords();
+        }
+        if (g_PlacesEnable)
+            LoadPlaceWords();
         g_RegardLoading = false;
     }).detach();
 }
@@ -743,4 +798,35 @@ std::string Market_Section(Player* bot, bool trade)
     return "\nTalk at the market here: " + it->second[urand(0, uint32(it->second.size() - 1))] + "\n"
         "(Mention it naturally and in character, as something you saw or heard at the stalls; "
         "never give prices, counts or other numbers.)\n";
+}
+
+std::string Place_Section(Player* bot)
+{
+    // Two deliberate departures from the three sections above, both from plan 46 section 5:
+    //
+    //   * it is NOT gated on g_RegardEnable. A section that inherits another feature's switch stops being
+    //     measurable the moment that feature is touched, and this one has a measurement waiting on it.
+    //   * it rolls its chance at EVERY call site, including a reply to a player, where the neighbours pass
+    //     `always`. Always-on is what turns text into wallpaper: the bot's own zone name is already in
+    //     every prompt it ever builds and reaches speech 3.4% of the time (plan 40 section 3).
+    if (!g_PlacesEnable || !bot)
+        return "";
+
+    if (urand(0, 99) >= g_PlacesChance)
+        return "";
+
+    std::shared_ptr<const PlaceMap> places;
+    {
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        places = g_PlaceWords;
+    }
+    if (!places)
+        return "";
+
+    auto it = places->find(bot->GetZoneId());
+    if (it == places->end() || it->second.empty())
+        return "";
+
+    return "\nWhat this land is like, to those who know it: "
+        + it->second[urand(0, uint32(it->second.size() - 1))] + "\n";
 }

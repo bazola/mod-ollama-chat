@@ -455,6 +455,7 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
     prompt += Memory_BuildPromptSection(bot, nullptr);
     prompt += Regard_PromptSection(bot, nullptr);
     prompt += Regard_CompanySection(bot, actor, false);
+    prompt += Place_Section(bot);
     prompt += Roleplay_BuildVoicePrompt(bot);
     prompt += Expression_BuildGesturePrompt();
 

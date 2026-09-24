@@ -271,6 +271,9 @@ uint32_t    g_ChronicleRumourChance         = 25;
 bool        g_MarketTalk                    = false;
 uint32_t    g_MarketTradeChance             = 60;
 uint32_t    g_MarketChance                  = 10;
+bool        g_PlacesEnable                  = false;
+uint32_t    g_PlacesChance                  = 30;
+std::string g_PlacesEra                     = "classic";
 uint32_t    g_RelationshipMaxLength         = 220;
 std::string g_RelationshipUpdatePrompt;
 std::string g_RelationshipPromptTemplate;
@@ -784,6 +787,9 @@ void LoadOllamaChatConfig()
     g_MarketTalk                   = sConfigMgr->GetOption<bool>("OllamaChat.Market.Talk", false);
     g_MarketTradeChance            = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Market.TradeChance", 60));
     g_MarketChance                 = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Market.Chance", 10));
+    g_PlacesEnable                 = sConfigMgr->GetOption<bool>("OllamaChat.Places.Enable", false);
+    g_PlacesChance                 = std::min<uint32_t>(100, sConfigMgr->GetOption<uint32_t>("OllamaChat.Places.Chance", 30));
+    g_PlacesEra                    = sConfigMgr->GetOption<std::string>("OllamaChat.Places.Era", "classic");
     g_RelationshipMaxLength        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MaxLength", 220);
 
     g_RelationshipUpdatePrompt     = sConfigMgr->GetOption<std::string>("OllamaChat.Relationship.UpdatePrompt", "");

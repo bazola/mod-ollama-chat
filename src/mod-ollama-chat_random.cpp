@@ -257,6 +257,7 @@ namespace
         prompt += Regard_CompanySection(bot, nullptr, guildTopic);
         prompt += Chronicle_RumourSection(bot, variation.find("rumo") != std::string::npos);
         prompt += Market_Section(bot, trade);
+        prompt += Place_Section(bot);
         prompt += Roleplay_BuildVoicePrompt(bot);
         prompt += Expression_BuildGesturePrompt();
 

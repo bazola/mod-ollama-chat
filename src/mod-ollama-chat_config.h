@@ -433,6 +433,14 @@ extern uint32_t    g_ChronicleRumourChance;
 extern bool        g_MarketTalk;
 extern uint32_t    g_MarketTradeChance;
 extern uint32_t    g_MarketChance;
+// The almanac of places (plan 46): what the land under the bot's feet is like, from place_words, written
+// by custom-wow services/lore/gen_places.py. Loaded on the regard thread's timer like the three above, but
+// DELIBERATELY not gated on Regard.Enable in the prompt -- plan 46 section 5 requires its own switch, or
+// the measurement in plan 40 section 7 stops being readable the moment regard is touched. Era is in the
+// table's key because Silithus before and after the war are not the same place.
+extern bool        g_PlacesEnable;
+extern uint32_t    g_PlacesChance;
+extern std::string g_PlacesEra;
 // Orders from a bot's master (plan 21 P7): no in-character reply to what mod-playerbots runs as a command.
 extern bool        g_SkipMasterCommands;
 extern uint32_t    g_RelationshipMaxLength;

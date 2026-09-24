@@ -200,6 +200,9 @@ extern uint32_t g_MaxQueueDepth;
 extern uint32_t g_MaxReplyLength;
 extern bool     g_ResponseStripMarkdown;
 extern bool     g_ResponseStripDecorativeUnicode;
+// The prompt's own character sheet, said out loud (plans/50 §4): 1.52% of bot lines on 2026-09-24, mostly
+// in the template's literal second person. Strips the leading sheet sentences only, never the whole line.
+extern bool     g_ResponseStripPersonaSheet;
 
 // --------------------------------------------
 // Conversation governor

@@ -193,6 +193,108 @@ std::string StripSpeakerPrefix(const std::string& text, const std::string& botNa
     return s;
 }
 
+std::string StripPersonaSheet(const std::string& text, const std::string& botName)
+{
+    // The ambient template's own opening, spoken aloud. MEASURED 2026-09-24 (plans/50 §4): 68 lines, 1.52%
+    // of every bot line that day, 54 of them in the literal second person of
+    // RandomChatterPromptTemplate -- "You are Sylrela, a female night elf druid of the Alliance, living in
+    // Azeroth. You stand in Stormwind City on the Eastern Kingdoms." One reached General chat reworded into
+    // the third person. They are NOT truncated generations: median 19 words, correct punctuation, terminal
+    // full stops. The model is treating its instructions as the line to say.
+    //
+    // Conservative in exactly the way StripSpeakerPrefix above is, and for the same reason: it acts only on
+    // LEADING sentences and only when they name THIS bot, so an ordinary line that happens to open with
+    // "You are late" or to mention somebody else survives untouched.
+    //
+    // It removes the sheet SENTENCE rather than the line, because 38 of those 68 carried real speech behind
+    // the sheet; dropping whole lines would cost more than the echo does. A line that is nothing but sheet
+    // (30 of 68) correctly reduces to empty, and the caller then skips it.
+    if (!g_ResponseStripPersonaSheet || botName.empty())
+        return text;
+
+    auto lower = [](std::string v)
+    {
+        for (char& c : v)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return v;
+    };
+    auto has = [](const std::string& hay, const char* needle)
+    {
+        return hay.find(needle) != std::string::npos;
+    };
+    auto opens = [](const std::string& hay, const std::string& needle)
+    {
+        return hay.compare(0, needle.size(), needle) == 0;
+    };
+
+    // The template's own words, not a guess at what a persona looks like.
+    static const char* const MARKERS[] = {
+        "of the alliance", "of the horde", "living in azeroth",
+        "on kalimdor", "on eastern kingdoms", "on the eastern kingdoms",
+    };
+    // Only ever considered AFTER a sheet opener has matched, so these cannot eat ordinary speech.
+    static const char* const CONTINUATIONS[] = {
+        "you are in", "you are ", "you stand", "you walk", "you speak", "you remember", "you carry",
+        "you live", "i live in", "i am in", "she is in", "he is in", "they are in",
+    };
+
+    std::string s = Trim(text);
+    const std::string name = lower(botName);
+    int dropped = 0;
+
+    // The model shortens names. MEASURED: a bot called Nedlaess was handed back "You are Ned, a night elf
+    // rogue of the Alliance, living in Azeroth", which a whole-name test misses. So the word after the
+    // opener need only be a PREFIX of this bot's name, three characters or more -- which still refuses
+    // "You are late, Aldric", because "late" is no prefix of "aldric".
+    auto namesThisBot = [&](const std::string& sent, const std::string& lead)
+    {
+        if (!opens(sent, lead))
+            return false;
+        size_t i = lead.size();
+        std::string word;
+        while (i < sent.size() &&
+               (std::isalpha(static_cast<unsigned char>(sent[i])) || sent[i] == '\''))
+            word.push_back(sent[i++]);
+        return word.size() >= 3 && word.size() <= name.size() &&
+               name.compare(0, word.size(), word) == 0;
+    };
+
+    while (!s.empty() && dropped < 3)
+    {
+        size_t end = 0;
+        while (end < s.size() && s[end] != '.' && s[end] != '!' && s[end] != '?')
+            ++end;
+        if (end >= s.size())
+            break;                       // no sentence break at all: leave the line alone
+
+        const std::string sentence = lower(s.substr(0, end));
+
+        bool marker = false;
+        for (const char* m : MARKERS)
+            marker = marker || has(sentence, m);
+
+        // "You are <name>" / "I am <name>" needs nothing else: no line spoken in character opens by telling
+        // itself who it is.
+        const bool opener = namesThisBot(sentence, "you are ") || namesThisBot(sentence, "i am ");
+        // "<name> stands tall, ... a warlock of the Alliance" -- self-narration in the third person. This one
+        // does need a marker, because a line may legitimately begin with a name.
+        const bool selfNarration = opens(sentence, name) && marker;
+
+        bool continuation = false;
+        if (dropped > 0)
+            for (const char* c : CONTINUATIONS)
+                continuation = continuation || opens(sentence, c);
+
+        if (!opener && !selfNarration && !continuation)
+            break;
+
+        s = Trim(s.substr(end + 1));
+        ++dropped;
+    }
+
+    return s;
+}
+
 std::string CollapseWhitespace(const std::string& text)
 {
     std::string out;
@@ -376,6 +478,8 @@ std::string ProcessLlmResponse(const std::string& raw,
     s = CollapseWhitespace(s);
     s = UnwrapQuotedReply(s);
     s = StripSpeakerPrefix(s, botName);
+    // After the speaker prefix, so "Sylrela: You are Sylrela, a night elf druid..." loses both halves.
+    s = StripPersonaSheet(s, botName);
 
     if (g_ResponseStripDecorativeUnicode)
         s = StripDecorativeUnicode(s);

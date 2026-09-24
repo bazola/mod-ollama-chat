@@ -119,6 +119,7 @@ uint32_t g_MaxQueueDepth          = 64;
 uint32_t g_MaxReplyLength                = 240;
 bool     g_ResponseStripMarkdown         = true;
 bool     g_ResponseStripDecorativeUnicode = true;
+bool     g_ResponseStripPersonaSheet     = true;
 
 // --------------------------------------------
 // Conversation governor
@@ -835,6 +836,7 @@ void LoadOllamaChatConfig()
     g_MaxReplyLength                  = sConfigMgr->GetOption<uint32_t>("OllamaChat.MaxReplyLength", 240);
     g_ResponseStripMarkdown           = sConfigMgr->GetOption<bool>("OllamaChat.StripMarkdown", true);
     g_ResponseStripDecorativeUnicode  = sConfigMgr->GetOption<bool>("OllamaChat.StripDecorativeUnicode", true);
+    g_ResponseStripPersonaSheet       = sConfigMgr->GetOption<bool>("OllamaChat.StripPersonaSheet", true);
 
     // --- Conversation governor -------------------------------------------
     g_MaxChainDepth                   = static_cast<uint8_t>(sConfigMgr->GetOption<uint32_t>("OllamaChat.BotConversation.MaxChainDepth", 3));

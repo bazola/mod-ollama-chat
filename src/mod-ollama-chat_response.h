@@ -28,6 +28,13 @@ std::string UnwrapQuotedReply(const std::string& text);
 //   "Thrall: hey there"  /  "<Thrall> hey there"  /  "[Thrall] hey there"
 std::string StripSpeakerPrefix(const std::string& text, const std::string& botName);
 
+// Strip the prompt's own character sheet when the model says it out loud (plans/50 §4):
+//   "You are Sylrela, a female night elf druid of the Alliance, living in Azeroth. You stand in Stormwind."
+//   "I am Vanda, a female human warlock of the Alliance. I live in Darnassus, on Kalimdor."
+//   "Bary stands tall, her voice low - a warlock of the Alliance, living in Azeroth."
+// Removes only LEADING sheet sentences that name this bot, leaving any real speech that followed them.
+std::string StripPersonaSheet(const std::string& text, const std::string& botName);
+
 // Collapse CR/LF/tabs to single spaces and squeeze runs of whitespace.
 std::string CollapseWhitespace(const std::string& text);
 

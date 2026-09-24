@@ -1458,6 +1458,18 @@ OllamaChat.MaxReplyLength = 240
 #        Default: 1
 OllamaChat.StripMarkdown = 1
 
+#    OllamaChat.StripPersonaSheet
+#        Local patch (custom wow plans/50 §4). Drop the prompt's own character
+#        sheet when a bot says it out loud -- "You are Sylrela, a female night
+#        elf druid of the Alliance, living in Azeroth." Measured at 1.52% of all
+#        bot lines on 2026-09-24, 54 of 68 in the template's literal second
+#        person, and not truncation: full sentences, correct punctuation. Only
+#        LEADING sentences that name this bot are removed, so real speech that
+#        followed the sheet survives; a line that is nothing but sheet becomes
+#        empty and is skipped.
+#        Default: 1
+OllamaChat.StripPersonaSheet = 1
+
 #    OllamaChat.StripDecorativeUnicode
 #        Fold smart quotes and dashes to ASCII, then drop emoji and symbols the
 #        3.3.5 client renders as boxes. Accented Latin characters are kept.

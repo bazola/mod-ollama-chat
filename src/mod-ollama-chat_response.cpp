@@ -267,7 +267,8 @@ std::string StripPersonaSheet(const std::string& text, const std::string& botNam
         if (end >= s.size())
             break;                       // no sentence break at all: leave the line alone
 
-        const std::string sentence = lower(s.substr(0, end));
+        const std::string raw      = s.substr(0, end);
+        const std::string sentence = lower(raw);
 
         bool marker = false;
         for (const char* m : MARKERS)
@@ -276,6 +277,24 @@ std::string StripPersonaSheet(const std::string& text, const std::string& botNam
         // "You are <name>" / "I am <name>" needs nothing else: no line spoken in character opens by telling
         // itself who it is.
         const bool opener = namesThisBot(sentence, "you are ") || namesThisBot(sentence, "i am ");
+
+        // A sheet about SOMEBODY ELSE. The test above keys on this bot's own name, so a bot handed the
+        // PERSON IT IS ANSWERING as a sheet sails straight through it -- MEASURED 2026-09-25, the alt
+        // An alt saying "You are Aldric, the last of your kind... bound by honor to the Alliance."
+        // Requiring a capitalised word followed immediately by a comma, AND one of the template's own
+        // markers in the same sentence, is what keeps the three recorded must-survive lines alive:
+        // "You are late, Aldric" (not capitalised), "You are the last of the Alliance I trust" (no name,
+        // no comma), "I am tired of this mud" (neither).
+        bool otherSheet = false;
+        if (!opener && marker && sentence.compare(0, 8, "you are ") == 0 && raw.size() > 8 &&
+            raw[8] >= 'A' && raw[8] <= 'Z')
+        {
+            size_t i = 8;
+            while (i < raw.size() &&
+                   (std::isalpha(static_cast<unsigned char>(raw[i])) || raw[i] == '\''))
+                ++i;
+            otherSheet = (i - 8) >= 3 && i < raw.size() && raw[i] == ',';
+        }
         // "<name> stands tall, ... a warlock of the Alliance" -- self-narration in the third person. This one
         // does need a marker, because a line may legitimately begin with a name.
         const bool selfNarration = opens(sentence, name) && marker;
@@ -285,7 +304,7 @@ std::string StripPersonaSheet(const std::string& text, const std::string& botNam
             for (const char* c : CONTINUATIONS)
                 continuation = continuation || opens(sentence, c);
 
-        if (!opener && !selfNarration && !continuation)
+        if (!opener && !otherSheet && !selfNarration && !continuation)
             break;
 
         s = Trim(s.substr(end + 1));

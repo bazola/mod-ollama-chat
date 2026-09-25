@@ -195,9 +195,14 @@ std::string Roleplay_BuildVoicePrompt(Player* bot)
 
     if (g_RoleplayStrictness >= 1)
     {
-        out += " Stay in character at all times. You are a person living in this world, not a "
-               "player of a game: never mention servers, patches, classes as 'specs', damage "
-               "numbers, experience points, or anything outside the world itself.";
+        // Naming the forbidden things is how you teach them. MEASURED 2026-09-25: bots recited this very
+        // instruction back as dialogue -- "no grand tales, no game mechanics", "No one speaks to me as if
+        // I were a player with levels or loot tables" -- in 0.64% of lines with a player present against
+        // 0.02% unattended, so it is a reply-path habit and unattended measurement is blind to it. Same
+        // failure as the persona sheet: an instruction handed to the model is treated as content. The rule
+        // is therefore stated positively and names none of the words it forbids.
+        out += " Stay in character at all times. You are a person living in this world, and you speak "
+               "only of what someone here could see, touch, or have heard tell of.";
     }
 
     if (g_RoleplayStrictness >= 2)

@@ -1186,6 +1186,18 @@ std::string ChatHandler_DescribeTheirDoings(Player* bot, Player* about)
     if (!together)
         return "\n" + out + "\n";
 
+    // Zero means none at all, and it has to be said here: the cap below is tested AFTER the push, so a
+    // setting of 0 on its own still injects exactly one errand. Setting the key and believing it was the
+    // whole fix is the mistake this guard exists to make impossible.
+    //
+    // This block is the SIXTH raw-quest-title site, and the only one that leaks the log of the person
+    // SPOKEN TO rather than the bot's own. MEASURED 2026-09-25: a bonded alt said "More Sparklematic
+    // Action concluded" -- quest 2953, whose only holder on the whole realm is the player she was
+    // answering. Titles reach speech in 1.40% of lines; `quest_words` owns the bot's own, and this owns
+    // everyone else's (plans/50).
+    if (g_SnapshotTheirTasks == 0)
+        return "\n" + out + "\n";
+
     std::vector<std::string> tasks;
     for (auto const& [questId, qsd] : about->getQuestStatusMap())
     {

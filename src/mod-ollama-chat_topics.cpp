@@ -1,6 +1,7 @@
 #include "mod-ollama-chat_topics.h"
 #include "mod-ollama-chat_config.h"
 #include "mod-ollama-chat_roleplay.h"
+#include "mod-ollama-chat_sentiment.h"   // QuestWords_For: an errand named as a person would name it
 #include "mod-ollama-chat_world.h"
 #include "mod-ollama-chat-utilities.h"
 
@@ -481,7 +482,15 @@ namespace
                 objective = quest->GetDetails().empty() ? "finish what you started"
                                                         : "see it through";
 
-            active.emplace_back(quest->GetTitle(), objective);
+            // The errand as a person would name it, never the quest-log title (plan 50, the last of the
+            // six sites). An errand with no phrasing is left out altogether: both pools below interpolate
+            // {quest_name}, so there is no graceful unnamed form here, and the fallback must never be the
+            // title. The objective text beside it is the quest's own prose, which is a separate question.
+            const std::string errand = QuestWords_For(qs.first);
+            if (errand.empty())
+                continue;
+
+            active.emplace_back(errand, objective);
         }
 
         if (!active.empty())

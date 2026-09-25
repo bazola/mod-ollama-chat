@@ -1206,14 +1206,12 @@ std::string ChatHandler_DescribeTheirDoings(Player* bot, Player* about)
         Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
         if (!quest)
             continue;
-        std::string title = quest->GetTitle();
-        if (auto const* locale = sObjectMgr->GetQuestLocale(questId))
-        {
-            int locIdx = about->GetSession() ? about->GetSession()->GetSessionDbLocaleIndex() : -1;
-            if (locIdx >= 0)
-                ObjectMgr::GetLocaleString(locale->Title, locIdx, title);
-        }
-        tasks.push_back("\"" + title + "\""
+        // The title itself never goes in. An errand with no phrasing is simply not mentioned -- plan 50's
+        // rule, and the locale lookup that used to sit here went with the title it was translating.
+        const std::string errand = QuestWords_For(questId);
+        if (errand.empty())
+            continue;
+        tasks.push_back(errand
                         + (qsd.Status == QUEST_STATUS_COMPLETE ? " (done, not yet reported)" : ""));
         if (tasks.size() >= g_SnapshotTheirTasks)
             break;
@@ -1261,16 +1259,12 @@ std::string GenerateBotGameStateSnapshot(Player* bot)
         if (!quest)
             continue;
 
-        // get the English title as a fallback
-        std::string title = quest->GetTitle();
-
-        // then, if we have a locale record, overwrite it
-        if (auto const* locale = sObjectMgr->GetQuestLocale(questId))
-        {
-            int locIdx = bot->GetSession()->GetSessionDbLocaleIndex();
-            if (locIdx >= 0)
-                ObjectMgr::GetLocaleString(locale->Title, locIdx, title);
-        }
+        // The errand as a person would name it, never the quest-log title (plan 50). No phrasing means
+        // the bot simply does not bring that errand up -- the fallback is silence, and the locale lookup
+        // that used to stand here went with the title it was translating.
+        const std::string title = QuestWords_For(questId);
+        if (title.empty())
+            continue;
 
         // Convert quest status to readable string
         std::string statusText;

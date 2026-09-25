@@ -50,8 +50,15 @@ namespace
     std::mutex                    g_CompanionMutex;
     std::unordered_set<uint64_t>  g_Companions;
 
+    // SanitizeUTF8 before escaping, because escaping is about quotes and this is about bytes. A model
+    // that answers with a Windows-1252 smart quote (0x94) hands us a string that is not UTF-8 at all,
+    // and MySQL answers with errno 1366 and drops the row: three memories were lost that way on the
+    // night of 2026-09-24, silently, since the transaction's other statements still commit. Every
+    // caller here writes model text -- a memory, a deed line, a relationship -- so the sanitising
+    // belongs at this one point rather than at each of them.
     std::string Escape(std::string v)
     {
+        v = SanitizeUTF8(v);
         CharacterDatabase.EscapeString(v);
         return v;
     }

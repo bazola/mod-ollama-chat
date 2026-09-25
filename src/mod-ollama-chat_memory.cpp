@@ -1149,6 +1149,53 @@ std::string Memory_BuildPromptSection(Player* bot, Player* about)
             for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
                 note(ref->GetSource());
 
+        // A memory is written ABOUT its owner, from the outside -- Memory.CondensePrompt asks for the third
+        // person so that one bot's notes can be read by another and by the chronicler. Handed back to its
+        // owner unchanged, that is a bot reading its own file aloud, and it reaches speech: MEASURED
+        // 2026-09-25, 13 of 787 lines (1.65%), always the same shape -- "Shucko walks alone through the red
+        // dust of Mulgore. No one saw the fall." Only the OWNER's name is turned around here; every other
+        // name in the sentence must stay in the third person, or the bot begins claiming other people's
+        // deeds as its own (plans/50 leak two, the half the conf header could not reach).
+        auto isWordChar = [](char c)
+        {
+            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '\'';
+        };
+        auto ownNameToFirstPerson = [&isWordChar](std::string text, const std::string& name)
+        {
+            if (name.empty())
+                return text;
+
+            for (size_t i = text.find(name); i != std::string::npos; i = text.find(name, i))
+            {
+                const size_t after = i + name.size();
+                const bool possessive = after + 2 <= text.size() && text.compare(after, 2, "'s") == 0;
+                const size_t end = possessive ? after + 2 : after;
+
+                const bool leftFree  = (i == 0) || !isWordChar(text[i - 1]);
+                const bool rightFree = (end >= text.size()) || !isWordChar(text[end]);
+                if (!leftFree || !rightFree)
+                {
+                    i = end;
+                    continue;
+                }
+
+                std::string with = possessive ? "my" : "I";
+                if (possessive)
+                {
+                    // "My blade" opening a sentence, "my blade" inside one.
+                    size_t b = i;
+                    while (b > 0 && (text[b - 1] == ' ' || text[b - 1] == '"'))
+                        --b;
+                    if (b == 0 || text[b - 1] == '.' || text[b - 1] == '!' || text[b - 1] == '?')
+                        with = "My";
+                }
+
+                text.replace(i, end - i, with);
+                i += with.size();
+            }
+            return text;
+        };
+
         std::string lines;
         uint32_t used = 0;
         uint32_t withheld = 0;
@@ -1162,7 +1209,7 @@ std::string Memory_BuildPromptSection(Player* bot, Player* about)
                 ++withheld;
                 continue;
             }
-            lines += " - " + m.text + "\n";
+            lines += " - " + ownNameToFirstPerson(m.text, bot->GetName()) + "\n";
             used += cost;
         }
 

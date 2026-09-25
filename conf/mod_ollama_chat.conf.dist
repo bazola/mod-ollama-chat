@@ -305,6 +305,21 @@ OllamaChat.Places.Enable = 0
 OllamaChat.Places.Chance = 30
 OllamaChat.Places.Era = classic
 
+# OllamaChat.QuestWords.Enable
+# OllamaChat.QuestWords.Era
+#     Description: Local patch (custom wow plans 50 and 51). A quest-log title is a game artefact, like a
+#                  level number, and handing one to the model is how "The Legend of Stalvan" came to be
+#                  spoken aloud and written into the permanent memory store. With this on, an errand is
+#                  named the way a person would name it, from quest_words -- written by custom-wow
+#                  services/lore/gen_quest_words.py from the quests this realm has actually touched, on
+#                  this machine. Nothing about the world ships in the repository, and an absent table is
+#                  silently a no-op. THE FALLBACK IS SILENCE: a quest with no phrasing goes unnamed, and
+#                  never back to the title, because falling back is exactly how the titles got out.
+#                  Loaded on the regard thread's timer and, like Places, it does not need Regard.Enable.
+#     Default:     0, classic
+OllamaChat.QuestWords.Enable = 0
+OllamaChat.QuestWords.Era = classic
+
 # OllamaChat.BlacklistCommands
 #     Description: A comma-separated list of command prefixes that should be ignored by AI bots.
 #                  If a message starts with any of these prefixes, the bot will not respond.

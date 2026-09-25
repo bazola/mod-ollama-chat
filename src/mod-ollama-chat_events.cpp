@@ -114,15 +114,25 @@ namespace
             return SafeFormat("{} brought down {}, the master of this place", actor, detail);
         if (type == g_EventTypeDefeated || type == g_EventTypePetDefeated)
             return SafeFormat("{} killed {}", actor, detail);
+        // A deed where the actor is also the victim is a fight nobody had: a death and a kill land in the
+        // same instant and are seen twice. Measured 2026-09-25 (plan 51 W4): 17 live buffer rows read
+        // "Fyladearn cut down Fyladearn in a fight". Say nothing rather than say that.
         if (type == g_EventTypeDefeatedPlayer)
-            return SafeFormat("{} cut down {} in a fight", actor, detail);
+            return detail == actor ? std::string()
+                                   : SafeFormat("{} cut down {} in a fight", actor, detail);
         if (type == g_EventTypeDied)
-            return detail.empty() ? SafeFormat("{} was killed", actor)
-                                  : SafeFormat("{} was killed by {}", actor, detail);
+            return (detail.empty() || detail == actor)
+                       ? SafeFormat("{} was killed", actor)
+                       : SafeFormat("{} was killed by {}", actor, detail);
         if (type == g_EventTypeGotItem)
             return SafeFormat("{} picked up {}", actor, detail);
+        // The errand is named the way a person would name it, or not named at all. `detail` arrives here
+        // already rendered through quest_words (see OnPlayerCompleteQuest); an empty one means this realm
+        // has no phrasing for that quest, and plan 50's rule is that the fallback OMITS the name rather
+        // than falling back to the log title, which is exactly how titles reached the memory store.
         if (type == g_EventTypeCompletedQuest)
-            return SafeFormat("{} finished the task '{}'", actor, detail);
+            return detail.empty() ? SafeFormat("{} finished an errand", actor)
+                                  : SafeFormat("{} finished {}", actor, detail);
         if (type == g_EventTypeLeveledUp)
             return detail.empty() ? SafeFormat("{} grew stronger", actor)
                                   : SafeFormat("{} grew stronger, now level {}", actor, detail);
@@ -599,7 +609,14 @@ void ChatOnQuest::OnPlayerCompleteQuest(Player* player, Quest const* quest)
     if (!player || !quest)
         return;
 
-    eventChatter.DispatchGameEvent(player, g_EventTypeCompletedQuest, quest->GetTitle());
+    // The quest-log title never leaves this function. It is a game artefact, like a level number, and
+    // handing it to the model is how "The Legend of Stalvan" and "More Sparklematic Action" ended up
+    // spoken aloud and written into the permanent memory store (plan 50; 341 of 928 live buffer lines
+    // still carried one when this was written). QuestWords_For gives this realm's own phrasing, and when
+    // it has none the errand goes UNNAMED -- the fallback must never be the title.
+    const std::string errand = QuestWords_For(quest->GetQuestId());
+
+    eventChatter.DispatchGameEvent(player, g_EventTypeCompletedQuest, errand);
 
     if (player->GetGuild() && g_EnableGuildEventChatter &&
         !g_GuildEventTypeDungeonComplete.empty() &&
@@ -607,7 +624,8 @@ void ChatOnQuest::OnPlayerCompleteQuest(Player* player, Quest const* quest)
     {
         eventChatter.DispatchGameEvent(
             player, g_GuildEventTypeDungeonComplete,
-            SafeFormat("{} in {}", quest->GetTitle(), OllamaContinentName(player)));
+            errand.empty() ? SafeFormat("an errand in {}", OllamaContinentName(player))
+                           : SafeFormat("{} in {}", errand, OllamaContinentName(player)));
     }
 }
 

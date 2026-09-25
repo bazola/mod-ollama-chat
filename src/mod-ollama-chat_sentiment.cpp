@@ -568,15 +568,47 @@ namespace
 
     std::shared_ptr<const PlaceMap> g_PlaceWords;   // guarded by g_RegardMutex
 
+    using QuestMap = std::unordered_map<uint32_t, std::string>;   // quest id -> how a person names it
+
+    std::shared_ptr<const QuestMap> g_QuestWords;   // guarded by g_RegardMutex
+
     // The era is a config string that ends up inside a query, so it is cut down to what an era name may
-    // contain before it gets there.
-    std::string EraForSql()
+    // contain before it gets there. Takes the string rather than reading one global, because two features
+    // now carry an era and the next one should not have to copy this.
+    std::string EraForSql(const std::string& raw)
     {
         std::string era;
-        for (char c : g_PlacesEra)
+        for (char c : raw)
             if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
                 era.push_back(c);
         return era;
+    }
+
+    // Plan 51 W3. One phrasing per quest, keyed by id, so naming an errand costs no query. An absent
+    // table is silently a no-op and every errand then goes unnamed, which is the correct fallback.
+    void LoadQuestWords()
+    {
+        if (!TableExists("quest_words"))
+            return;
+
+        const std::string era = EraForSql(g_QuestWordsEra);
+        if (era.empty())
+            return;
+
+        auto quests = std::make_shared<QuestMap>();
+        if (QueryResult result = CharacterDatabase.Query(SafeFormat(
+                "SELECT quest_id, words FROM quest_words WHERE era = '{}' ORDER BY quest_id, variant", era)))
+        {
+            do
+            {
+                Field* f = result->Fetch();
+                // ORDER BY variant with insert-if-absent keeps variant 0, deterministically.
+                quests->emplace(f[0].Get<uint32_t>(), f[1].Get<std::string>());
+            } while (result->NextRow());
+        }
+
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        g_QuestWords = std::move(quests);
     }
 
     void LoadPlaceWords()
@@ -584,7 +616,7 @@ namespace
         if (!TableExists("place_words"))
             return;
 
-        const std::string era = EraForSql();
+        const std::string era = EraForSql(g_PlacesEra);
         if (era.empty())
             return;
 
@@ -610,7 +642,10 @@ void Regard_Tick(uint32 diff)
 
     // The almanac rides this timer but does not belong to regard, so the tick has to run for places alone
     // (plan 46 section 5). Everything regard's own switch pays for is gated inside the thread instead.
-    if (!g_RegardEnable && !g_PlacesEnable)
+    // Quest words ride it on the same terms (plan 51 W3): a loader that inherits another feature's switch
+    // stops being measurable the moment that feature is touched, which is the trap plan 46 paid for once
+    // already. Add the flag here as well as inside the thread, or the tick never runs to load them.
+    if (!g_RegardEnable && !g_PlacesEnable && !g_QuestWordsEnable)
         return;
 
     if (timer > diff)
@@ -638,6 +673,8 @@ void Regard_Tick(uint32 diff)
         }
         if (g_PlacesEnable)
             LoadPlaceWords();
+        if (g_QuestWordsEnable)
+            LoadQuestWords();
         g_RegardLoading = false;
     }).detach();
 }
@@ -829,4 +866,24 @@ std::string Place_Section(Player* bot)
 
     return "\nWhat this land is like, to those who know it: "
         + it->second[urand(0, uint32(it->second.size() - 1))] + "\n";
+}
+
+std::string QuestWords_For(uint32_t questId)
+{
+    // Off, or no table, or no phrasing for this errand: the caller gets nothing and must then leave the
+    // errand unnamed. That is the whole point -- plan 50 measured what happens when the fallback is the
+    // quest-log title, and it is titles in the mouths of bots and in the permanent memory store.
+    if (!g_QuestWordsEnable || questId == 0)
+        return "";
+
+    std::shared_ptr<const QuestMap> quests;
+    {
+        std::lock_guard<std::mutex> lock(g_RegardMutex);
+        quests = g_QuestWords;
+    }
+    if (!quests)
+        return "";
+
+    auto it = quests->find(questId);
+    return it == quests->end() ? std::string() : it->second;
 }

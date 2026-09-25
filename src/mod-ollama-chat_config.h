@@ -444,6 +444,12 @@ extern uint32_t    g_MarketChance;
 extern bool        g_PlacesEnable;
 extern uint32_t    g_PlacesChance;
 extern std::string g_PlacesEra;
+
+// Quest words (plan 50 section 6, wired by plan 51 W3): how a person names an errand, instead of the
+// title it carries in a quest log. An absent table is silently a no-op and every quest then goes unnamed,
+// which is the intended fallback -- never the raw title.
+extern bool        g_QuestWordsEnable;
+extern std::string g_QuestWordsEra;
 // Orders from a bot's master (plan 21 P7): no in-character reply to what mod-playerbots runs as a command.
 extern bool        g_SkipMasterCommands;
 extern uint32_t    g_RelationshipMaxLength;

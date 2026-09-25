@@ -110,6 +110,11 @@ std::string Chronicle_RumourSection(Player* bot, bool always);
 // never on Regard.Enable. Empty when disabled, when the zone has no entry, or when the roll fails.
 std::string Place_Section(Player* bot);
 
+// How this realm says the name of an errand. Empty when there is no phrasing for that quest, and the
+// caller must then omit the errand's name entirely rather than fall back to the quest-log title
+// (plan 50: the title is a game artefact, and falling back is how titles reached the memory store).
+std::string QuestWords_For(uint32_t questId);
+
 // Market talk (plan 17 E.4): one thing people are saying about the market in the city the bot stands in, from
 // market_word (written by market.py, loaded on the regard thread). `trade` rolls OllamaChat.Market.TradeChance
 // (a Trade-channel line), otherwise OllamaChat.Market.Chance. Empty when disabled, outside a market, or no roll.

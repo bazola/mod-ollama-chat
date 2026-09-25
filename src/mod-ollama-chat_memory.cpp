@@ -875,6 +875,12 @@ void Memory_NoteGameEvent(uint64_t botGuid, const std::string& line)
         if (state.eventBuffer.empty())
             state.eventFirstAt = NowSeconds();
 
+        // The same deed can reach one witness twice -- two hooks for one moment, or a party member's
+        // level-up seen once per member. Measured 2026-09-25 (plan 51 W4): 46 exact duplicates across a
+        // 928-row live buffer, and a digest asked to write three notes from two identical lines pads.
+        if (std::find(state.eventBuffer.begin(), state.eventBuffer.end(), line) != state.eventBuffer.end())
+            return;
+
         state.eventBuffer.push_back(line);
 
         // The buffer is durable state now (plan 41 M4), so a deed on its own is
@@ -1291,6 +1297,46 @@ void Memory_RunEventDigest(uint64_t botGuid, const std::string& prompt)
         std::lock_guard<std::mutex> lock(g_mutex);
         OllamaMemoryState& state = g_state[botGuid];
         state.eventFlushing = false;
+
+        // A digest that hands back one of its own input lines has not remembered anything -- it has
+        // copied. MEASURED 2026-09-25 (plan 51 W2): 1,266 stored memories are verbatim buffer lines,
+        // comma and place and all, e.g. "Erwin finished the task 'Supplies for the Crossroads', in The
+        // Barrens". Dropped here for the same reason dispatch.cpp's IsEcho drops a swallowed line that is
+        // just the prompt handed back. Deliberately narrow -- equality after normalising, and equality
+        // once the deed line's trailing ", in <place>" is taken off -- because a memory that quotes the
+        // deed AND adds something of its own is worth keeping.
+        if (!fresh.empty() && !state.eventBuffer.empty())
+        {
+            auto norm = [](std::string s)
+            {
+                for (char& c : s)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                while (!s.empty() && (s.back() == '.' || s.back() == ' '))
+                    s.pop_back();
+                return s;
+            };
+
+            std::unordered_set<std::string> inputs;
+            for (const std::string& line : state.eventBuffer)
+            {
+                const std::string n = norm(line);
+                inputs.insert(n);
+                const size_t at = n.rfind(", in ");
+                if (at != std::string::npos)
+                    inputs.insert(n.substr(0, at));
+            }
+
+            const size_t before = fresh.size();
+            fresh.erase(std::remove_if(fresh.begin(), fresh.end(),
+                                       [&](const BotMemoryEntry& m)
+                                       { return inputs.count(norm(m.text)) > 0; }),
+                        fresh.end());
+
+            if (before != fresh.size() && g_DebugEnabled)
+                LOG_INFO("module.ollamachat",
+                         "[Ollama Chat] Dropped {} copied deed line(s) from bot {}'s digest.",
+                         before - fresh.size(), botGuid);
+        }
 
         if (api.ok)
         {

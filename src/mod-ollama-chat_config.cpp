@@ -246,6 +246,7 @@ uint32_t    g_MemoryPromptTokenBudget  = 400;
 uint32_t    g_MemoryMaxPerBot          = 40;
 uint32_t    g_MemorySaveInterval       = 10;
 std::string g_MemoryCondensePrompt;
+std::string g_MemorySystemPrompt;
 std::string g_MemoryPromptTemplate;
 
 bool        g_MemoryEventEnable        = true;
@@ -747,6 +748,15 @@ void LoadOllamaChatConfig()
             "\"7 | ...\". Write them in the third person as short factual notes, at most 20 words each. "
             "Skip small talk. If nothing is worth keeping, write nothing.";
     }
+
+    // Plan 58. The memory writers used to be sent the world's system prompt, and a model asked for
+    // four notes about two deeds filled the rest from it: 886 memories across 453 bots said no army
+    // had sailed for Northrend. A note-taker needs to know it is taking notes, not what era it is.
+    g_MemorySystemPrompt           = sConfigMgr->GetOption<std::string>("OllamaChat.Memory.SystemPrompt", "");
+    if (g_MemorySystemPrompt.empty())
+        g_MemorySystemPrompt =
+            "You keep short notes of what really happened. Write only what the lines you are given show, "
+            "never anything they do not, and follow the requested format exactly.";
 
     g_MemoryPromptTemplate         = sConfigMgr->GetOption<std::string>("OllamaChat.Memory.PromptTemplate", "");
     if (g_MemoryPromptTemplate.empty())

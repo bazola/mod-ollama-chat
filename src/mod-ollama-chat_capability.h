@@ -39,6 +39,13 @@ enum class OllamaRequestKind : uint8_t
     // never shown to anyone. Routed to the cheap lane when one is configured,
     // and never allowed to think.
     Classify,
+
+    // Not a spoken line either: a note a bot keeps -- a memory condensed from
+    // talk, a digest of deeds, a relationship line. Sent with its own system
+    // prompt (Memory.SystemPrompt) rather than the world's, because the world's
+    // framing was being written down as something that happened: "No army has
+    // sailed for Northrend" stored as a memory 886 times (plan 58).
+    MemoryNote,
 };
 
 enum class OllamaThinkSupport : uint8_t

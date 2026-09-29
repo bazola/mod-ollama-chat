@@ -400,6 +400,7 @@ extern uint32_t    g_MemoryMaxPerBot;
 extern uint32_t    g_MemorySaveInterval;        // minutes
 extern std::string g_MemoryCondensePrompt;
 extern std::string g_MemoryPromptTemplate;
+extern std::string g_MemorySystemPrompt;        // system prompt for MemoryNote requests (plan 58)
 
 // Event memories (plan 38): a deed a bot took part in or watched becomes a
 // memory of its own, so "what did we do together" has an answer that was never

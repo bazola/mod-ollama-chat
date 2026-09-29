@@ -365,6 +365,7 @@ bool OllamaCapability_ShouldThink(OllamaRequestKind kind)
     switch (kind)
     {
         case OllamaRequestKind::Sentiment:
+        case OllamaRequestKind::MemoryNote:
             return true;    // a judgement, and never shown to players
         case OllamaRequestKind::RoleplayReply:
             return g_RoleplayStrictness >= 2;

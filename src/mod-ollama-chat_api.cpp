@@ -303,6 +303,10 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, u
 
     OllamaEndpointSettings cfg = OllamaConfig_Snapshot();
 
+    // A bot's own notes are not spoken in the world, so they do not get the world's framing (plan 58).
+    if (kind == OllamaRequestKind::MemoryNote)
+        cfg.systemPrompt = g_MemorySystemPrompt;
+
     // This character's own small offset from the shared sampling distribution.
     // Applied to the local copy only, and PerformOnce takes cfg by reference all
     // the way to BuildRequest, so nothing downstream re-reads the global.

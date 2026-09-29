@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <ctime>
 #include <mutex>
 #include <unordered_set>
@@ -255,6 +256,152 @@ namespace
         }
 
         return out;
+    }
+
+    // --- notes that are the prompt, not the past (plan 58) -----------------
+    //
+    // MEASURED 2026-09-26: 923 of 42,442 memories written since the last boot were the prompt handed
+    // back -- the world's framing ("No army has sailed for Northrend"), the digest's own scoring guide
+    // ("the master of a place brought down", "a road walked, a beast killed") and 145 that were the
+    // instructions themselves ("One per line. Prefix each with importance..."). A digest given four
+    // deeds and a 1-10 scale writes 10, 9, 8, 7 ... and fills the slots it has no deeds for from
+    // whatever text is in front of it. The copy check in Memory_RunEventDigest only catches a note
+    // that IS an input line; these are quotes of the instructions around the input.
+
+    std::vector<std::string> NoteWords(const std::string& text)
+    {
+        std::vector<std::string> out;
+        std::string cur;
+        for (char ch : text)
+        {
+            const unsigned char c = static_cast<unsigned char>(ch);
+            if (std::isalnum(c) || c == '\'' || c >= 0x80)
+                cur += static_cast<char>(std::tolower(c));
+            else if (!cur.empty())
+            {
+                out.push_back(std::move(cur));
+                cur.clear();
+            }
+        }
+        if (!cur.empty())
+            out.push_back(std::move(cur));
+        return out;
+    }
+
+    // Runs of four words, keeping only those with two words of four letters or more: "of the world
+    // and" says nothing about where a line came from, "no army has sailed" says everything.
+    void AddShingles(std::unordered_set<std::string>& into, const std::string& text)
+    {
+        const std::vector<std::string> w = NoteWords(text);
+        for (size_t i = 0; i + 4 <= w.size(); ++i)
+        {
+            uint32_t long_ = 0;
+            for (size_t k = i; k < i + 4; ++k)
+                if (w[k].size() >= 4)
+                    ++long_;
+            if (long_ >= 2)
+                into.insert(w[i] + ' ' + w[i + 1] + ' ' + w[i + 2] + ' ' + w[i + 3]);
+        }
+    }
+
+    // The literal pieces of a template, split at its {placeholders}.
+    std::vector<std::string> TemplatePieces(const std::string& tmpl)
+    {
+        std::vector<std::string> pieces;
+        size_t at = 0;
+        while (at < tmpl.size())
+        {
+            const size_t open = tmpl.find('{', at);
+            if (open == std::string::npos)
+            {
+                pieces.push_back(tmpl.substr(at));
+                break;
+            }
+            pieces.push_back(tmpl.substr(at, open - at));
+            const size_t close = tmpl.find('}', open);
+            if (close == std::string::npos)
+                break;
+            at = close + 1;
+        }
+        return pieces;
+    }
+
+    // A note cut off mid-sentence -- "The Scourge held the" -- ends on a word that cannot end one.
+    bool EndsCutOff(const std::string& text)
+    {
+        static const std::unordered_set<std::string> kDangling = {
+            "the", "a", "an", "of", "to", "and", "or", "but", "in", "on", "at", "by", "for", "from",
+            "with", "into", "onto", "his", "her", "their", "its", "my", "your", "our", "as", "that",
+            "which", "who", "whose", "than", "was", "were", "is", "had", "has" };
+        // Only without a closing mark: "...then moved on." and "...claimed her." are whole sentences.
+        std::string t = text;
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
+            t.pop_back();
+        if (t.empty())
+            return false;
+        static const char* const kClosers[] = { ".", "!", "?", "\"", "'", ")", "\xE2\x80\x9D", "\xE2\x80\x99", "\xE2\x80\xA6" };
+        for (const char* c : kClosers)
+        {
+            const size_t n = std::strlen(c);
+            if (t.size() >= n && t.compare(t.size() - n, n, c) == 0)
+                return false;
+        }
+        const std::vector<std::string> w = NoteWords(t);
+        return !w.empty() && kDangling.count(w.back()) > 0;
+    }
+
+    // Drops the notes that quote the scaffolding around what the model was given -- the template's
+    // own words and both system prompts -- unless the same words were also in what it was given
+    // (a deed line or a conversation may say "no army" for real). Returns how many went.
+    size_t DropScaffoldNotes(std::vector<BotMemoryEntry>& fresh, const std::string& prompt,
+                             const std::string& tmpl, uint64_t botGuid, const char* what)
+    {
+        if (fresh.empty())
+            return 0;
+
+        std::unordered_set<std::string> scaffold;
+        std::string fillings = prompt;
+        for (const std::string& piece : TemplatePieces(tmpl))
+        {
+            AddShingles(scaffold, piece);
+            if (piece.size() >= 12)
+            {
+                const size_t at = fillings.find(piece);
+                if (at != std::string::npos)
+                    fillings.replace(at, piece.size(), "\n");
+            }
+        }
+        AddShingles(scaffold, g_OllamaSystemPrompt);
+        AddShingles(scaffold, g_MemorySystemPrompt);
+
+        std::unordered_set<std::string> given;
+        AddShingles(given, fillings);
+
+        const size_t before = fresh.size();
+        fresh.erase(std::remove_if(fresh.begin(), fresh.end(),
+            [&](const BotMemoryEntry& m)
+            {
+                const char* why = nullptr;
+                if (EndsCutOff(m.text))
+                    why = "cut off";
+                else
+                {
+                    std::unordered_set<std::string> mine;
+                    AddShingles(mine, m.text);
+                    for (const std::string& sh : mine)
+                        if (scaffold.count(sh) && !given.count(sh))
+                        {
+                            why = "echoes the prompt";
+                            break;
+                        }
+                }
+                if (why)
+                    LOG_INFO("module.ollamachat", "[Ollama Chat] Memory note dropped ({}, {}) for bot {}: '{}'",
+                             what, why, botGuid, m.text);
+                return why != nullptr;
+            }),
+            fresh.end());
+        return before - fresh.size();
     }
 }
 
@@ -1236,11 +1383,12 @@ std::string Memory_BuildPromptSection(Player* bot, Player* about)
 
 void Memory_RunCondensation(uint64_t botGuid, const std::string& prompt)
 {
-    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::Sentiment);
+    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::MemoryNote);
 
     std::vector<BotMemoryEntry> fresh;
     if (api.ok)
         fresh = ParseMemories(api.text);
+    DropScaffoldNotes(fresh, prompt, g_MemoryCondensePrompt, botGuid, "condense");
 
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -1287,11 +1435,12 @@ void Memory_RunCondensation(uint64_t botGuid, const std::string& prompt)
 
 void Memory_RunEventDigest(uint64_t botGuid, const std::string& prompt)
 {
-    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::Sentiment);
+    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::MemoryNote);
 
     std::vector<BotMemoryEntry> fresh;
     if (api.ok)
         fresh = ParseMemories(api.text);
+    DropScaffoldNotes(fresh, prompt, g_MemoryEventPrompt, botGuid, "digest");
 
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -1336,6 +1485,20 @@ void Memory_RunEventDigest(uint64_t botGuid, const std::string& prompt)
                 LOG_INFO("module.ollamachat",
                          "[Ollama Chat] Dropped {} copied deed line(s) from bot {}'s digest.",
                          before - fresh.size(), botGuid);
+        }
+
+        // No more notes than deeds (plan 58). One companion's digests came back as runs of seven, scored
+        // 10 down to 4, from four deed lines -- the tail of every run was invented to fill the scale.
+        // Keep the ones the model scored highest.
+        if (!state.eventBuffer.empty() && fresh.size() > state.eventBuffer.size())
+        {
+            std::stable_sort(fresh.begin(), fresh.end(),
+                             [](const BotMemoryEntry& a, const BotMemoryEntry& b)
+                             { return a.importance > b.importance; });
+            for (size_t i = state.eventBuffer.size(); i < fresh.size(); ++i)
+                LOG_INFO("module.ollamachat", "[Ollama Chat] Memory note dropped (digest, over the deed count) "
+                         "for bot {}: '{}'", botGuid, fresh[i].text);
+            fresh.resize(state.eventBuffer.size());
         }
 
         if (api.ok)
@@ -1385,7 +1548,7 @@ void Memory_RunRelationshipUpdate(uint64_t botGuid, uint64_t otherGuid,
                                   const std::string& otherName,
                                   const std::string& prompt)
 {
-    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::Sentiment);
+    OllamaApiResult api = QueryOllama(prompt, OllamaRequestKind::MemoryNote);
 
     std::string description;
     if (api.ok)

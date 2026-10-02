@@ -35,6 +35,7 @@
 #include <deque>
 #include <list>
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -75,6 +76,13 @@ namespace
         OllamaHeldTongueRequest heldTongue;
     };
 
+    // World-thread delivery state: history must contain only messages actually sent.
+    struct ReplyDelivery
+    {
+        std::string spoken;
+        bool finished = false;
+    };
+
     struct Completion
     {
         OllamaChatRequest request;
@@ -92,6 +100,15 @@ namespace
         // reason: the emote and the memory write are both world-thread work.
         bool                    isHeldTongue = false;
         OllamaHeldTongueRequest heldTongue;
+
+        // Multi-message delivery. `text` stays the whole reply -- it is what
+        // the repetition checks, history and listening bots see -- and `parts`
+        // is how it goes out. Continuations share the delivered text so history
+        // and listening bots receive only what was actually sent.
+        std::vector<std::string> parts;
+        bool                     isContinuation = false;
+        bool                     isLastContinuation = false;
+        std::shared_ptr<ReplyDelivery> delivery;
     };
 
     // --- shared state -----------------------------------------------------
@@ -443,6 +460,9 @@ namespace
     {
         outChannel = nullptr;
 
+        // The first message of a split reply, or the whole line.
+        const std::string& text = c.parts.empty() ? c.text : c.parts.front();
+
         switch (c.request.source)
         {
             case SRC_GENERAL_LOCAL:
@@ -456,9 +476,9 @@ namespace
                 if (!world.RealPlayerInChannel(channel))
                     return false;
 
-                channel->Say(bot->GetGUID(), c.text, LANG_UNIVERSAL);
+                channel->Say(bot->GetGUID(), text, LANG_UNIVERSAL);
                 if (LedgerRecordBotChat)
-                    LedgerRecordBotChat(bot, CHAT_MSG_CHANNEL, c.text, channel);
+                    LedgerRecordBotChat(bot, CHAT_MSG_CHANNEL, text, channel);
                 outChannel = channel;
                 return true;
             }
@@ -474,7 +494,7 @@ namespace
                     return false;
                 if (!world.GuildHasRealPlayer(bot->GetGuildId()))
                     return false;
-                return botAI->SayToGuild(c.text);
+                return botAI->SayToGuild(text);
 
             // A company of bots is its own audience (plans/31 §19). The re-check above exists because an
             // LLM round trip is seconds long and the audience can leave inside it -- but it carried the
@@ -488,7 +508,7 @@ namespace
                 if (!OllamaGroupHasRealPlayer(bot) &&
                     !(g_PartyChatterEnable && bot->GetGroup()->GetMembersCount() >= 2))
                     return false;
-                return botAI->SayToParty(c.text);
+                return botAI->SayToParty(text);
 
             case SRC_RAID_LOCAL:
                 if (g_DisableForParty || !bot->GetGroup())
@@ -496,26 +516,26 @@ namespace
                 if (!OllamaGroupHasRealPlayer(bot) &&
                     !(g_PartyChatterEnable && bot->GetGroup()->GetMembersCount() >= 2))
                     return false;
-                return botAI->SayToRaid(c.text);
+                return botAI->SayToRaid(text);
 
             case SRC_YELL_LOCAL:
                 if (g_DisableForSayYell || !AnyoneInRange(bot, g_YellDistance))
                     return false;
-                return botAI->Yell(c.text);
+                return botAI->Yell(text);
 
             case SRC_WHISPER_LOCAL:
             {
                 Player* target = ObjectAccessor::FindConnectedPlayer(ObjectGuid(c.request.targetGuid));
                 if (!target)
                     return false;
-                return botAI->Whisper(c.text, target->GetName());
+                return botAI->Whisper(text, target->GetName());
             }
 
             case SRC_SAY_LOCAL:
             default:
                 if (g_DisableForSayYell || !AnyoneInRange(bot, g_SayDistance))
                     return false;
-                return botAI->Say(c.text);
+                return botAI->Say(text);
         }
     }
 
@@ -1060,6 +1080,53 @@ namespace
         }
     }
 
+    void RecordExchange(OllamaChatRequest const& request, std::string const& spoken)
+    {
+        if (!request.recordHistory || !request.targetGuid || spoken.empty())
+            return;
+        AppendBotConversation(request.botGuid, request.targetGuid, request.originMessage, spoken);
+        Player* target = ObjectAccessor::FindConnectedPlayer(ObjectGuid(request.targetGuid));
+        Memory_NoteExchange(request.botGuid, request.targetGuid,
+                            target ? target->GetName() : std::string(), request.originMessage, spoken);
+    }
+
+    void FinishSplitReply(Completion const& c, Player* bot, Channel* channel)
+    {
+        if (!c.delivery || c.delivery->finished)
+            return;
+        c.delivery->finished = true;
+        RecordExchange(c.request, c.delivery->spoken);
+        if (bot && bot->IsInWorld() && bot->IsAlive() && c.request.triggerBotReplies &&
+            c.request.source != SRC_WHISPER_LOCAL)
+            ProcessBotChatMessage(bot, c.delivery->spoken, c.request.source, channel,
+                                  static_cast<uint8_t>(c.request.chainDepth + 1));
+    }
+
+    // Later parts recheck their destination; a failed delivery cancels the rest
+    // and records the partial reply, never the as-yet unspoken model output.
+    void DeliverContinuation(const Completion& c, const OllamaWorldSnapshot& world)
+    {
+        if (!c.delivery || c.delivery->finished)
+            return;
+        Player* bot = ObjectAccessor::FindConnectedPlayer(ObjectGuid(c.request.botGuid));
+        PlayerbotAI* botAI = bot ? PlayerbotsMgr::instance().GetPlayerbotAI(bot) : nullptr;
+        Channel* channel = nullptr;
+        if (!bot || !bot->IsInWorld() || !bot->IsAlive() || !botAI ||
+            !RouteMessage(bot, botAI, c, world, channel))
+        {
+            FinishSplitReply(c, nullptr, nullptr);
+            return;
+        }
+        Governor_RecordUtterance(bot->GetGUID(), c.request.scopeKey, c.text);
+        c.delivery->spoken += " " + c.text;
+        NoteSpoken(c.request.scopeKey, bot->GetName());
+        if (c.isLastContinuation)
+            FinishSplitReply(c, bot, channel);
+        if (g_DebugEnabled)
+            LOG_INFO("module.ollamachat", "[Ollama Chat] {} ({}, continued): {}",
+                     bot->GetName(), ChatChannelSourceLocalStr[c.request.source], c.text);
+    }
+
     // By value: a repeated tail is trimmed off the line below, and the trimmed
     // text is what gets sent, recorded and echoed to the other bots.
     void Deliver(Completion c, const OllamaWorldSnapshot& world)
@@ -1151,6 +1218,16 @@ namespace
             }
         }
 
+        // Split after all delivery filters: no removed sentence may survive in stale parts.
+        if (g_DeliverySplit && c.text.size() > g_DeliveryMaxMessageBytes)
+        {
+            c.parts = SplitForChat(c.text, g_DeliveryMaxMessageBytes, g_DeliveryMaxMessages);
+            std::string spoken;
+            for (std::string const& part : c.parts)
+                spoken += (spoken.empty() ? "" : " ") + part;
+            c.text = std::move(spoken);
+        }
+
         if (!Governor_TryConsumeSend(botGuid, c.request.scopeKey, directAddress))
         {
             ++g_droppedGovernor;
@@ -1171,8 +1248,38 @@ namespace
             return;
         }
 
-        Governor_RecordUtterance(botGuid, c.request.scopeKey, c.text);
+        // Repetition history follows actual chat messages, including partial
+        // delivery. A later part may be cancelled before it is ever spoken.
+        Governor_RecordUtterance(botGuid, c.request.scopeKey, c.parts.empty() ? c.text : c.parts.front());
         ++g_totalDelivered;
+
+        // The rest of a split reply follows, each part after a pause that grows
+        // with its length, the way someone still talking would go on.
+        if (c.parts.size() > 1)
+        {
+            c.delivery = std::make_shared<ReplyDelivery>();
+            c.delivery->spoken = c.parts.front();
+            Clock::time_point at = Clock::now();
+            std::lock_guard<std::mutex> lock(g_doneMutex);
+            for (size_t i = 1; i < c.parts.size(); ++i)
+            {
+                uint32_t pauseMs = g_DeliveryPauseBaseMs +
+                                   static_cast<uint32_t>(c.parts[i].size()) * g_DeliveryPausePerCharMs;
+                if (g_DeliveryPauseMaxMs > 0 && pauseMs > g_DeliveryPauseMaxMs)
+                    pauseMs = g_DeliveryPauseMaxMs;
+                at += std::chrono::milliseconds(pauseMs);
+
+                Completion next;
+                next.request = c.request;
+                next.request.prompt.clear();
+                next.text           = c.parts[i];
+                next.isContinuation = true;
+                next.isLastContinuation = i + 1 == c.parts.size();
+                next.delivery       = c.delivery;
+                next.deliverAt      = at;
+                g_done.push_back(std::move(next));
+            }
+        }
 
         // The line has landed, so anyone who held their tongue waiting for this
         // speaker can now be seen to have done so.
@@ -1209,18 +1316,8 @@ namespace
         ScheduleBotExpression(bot, ObjectGuid(c.request.targetGuid), c.emoteId,
                               g_BotExpressionDelayMs);
 
-        if (c.request.recordHistory && c.request.targetGuid)
-        {
-            AppendBotConversation(c.request.botGuid, c.request.targetGuid,
-                                  c.request.originMessage, c.text);
-
-            // Counts name mentions and, past a threshold, queues a
-            // condensation or relationship revision. World thread.
-            Player* target = ObjectAccessor::FindConnectedPlayer(ObjectGuid(c.request.targetGuid));
-            Memory_NoteExchange(c.request.botGuid, c.request.targetGuid,
-                                target ? target->GetName() : std::string(),
-                                c.request.originMessage, c.text);
-        }
+        if (!c.delivery)
+            RecordExchange(c.request, c.text);
 
         if (c.request.updateSentiment && c.request.targetGuid &&
             !c.request.originMessage.empty())
@@ -1236,7 +1333,7 @@ namespace
 
         // Let other bots hear it -- with the chain depth advanced, which is
         // what stops the reply loop that had no brakes before.
-        if (c.request.triggerBotReplies &&
+        if (!c.delivery && c.request.triggerBotReplies &&
             c.request.source != SRC_WHISPER_LOCAL)
         {
             ProcessBotChatMessage(bot, c.text, c.request.source, channel,
@@ -1286,10 +1383,15 @@ void OllamaDispatch_Stop()
 
     g_workers.clear();
 
+    std::deque<Completion> abandoned;
     {
         std::lock_guard<std::mutex> lock(g_doneMutex);
-        g_done.clear();
+        abandoned.swap(g_done);
     }
+    // Shutdown runs on the world thread before the history/memory save.
+    for (Completion const& completion : abandoned)
+        if (completion.isContinuation)
+            FinishSplitReply(completion, nullptr, nullptr);
 
     LOG_INFO("module.ollamachat", "[Ollama Chat] Dispatcher stopped.");
 }
@@ -1510,6 +1612,8 @@ void OllamaDispatch_Update(uint32_t /*diff*/)
                 ResolveAddressee(c);
             else if (c.isHeldTongue)
                 ResolveHeldTongue(c);
+            else if (c.isContinuation)
+                DeliverContinuation(c, world);
             else
                 Deliver(c, world);
         }

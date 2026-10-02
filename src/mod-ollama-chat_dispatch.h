@@ -1,6 +1,7 @@
 #ifndef MOD_OLLAMA_CHAT_DISPATCH_H
 #define MOD_OLLAMA_CHAT_DISPATCH_H
 
+#include "mod-ollama-chat_api.h"
 #include "mod-ollama-chat_capability.h"
 #include "mod-ollama-chat_handler.h"
 
@@ -67,6 +68,9 @@ struct OllamaChatRequest
     // Generation.
     std::string       prompt;
     OllamaRequestKind kind = OllamaRequestKind::ChatReply;
+    // Person when this answers something a real player said; the lane only
+    // changes the model when OllamaChat.Reply.Model is set.
+    OllamaLane        lane = OllamaLane::Voice;
 
     // Resolved on the world thread before submission so the worker never has
     // to touch a Player to know these.

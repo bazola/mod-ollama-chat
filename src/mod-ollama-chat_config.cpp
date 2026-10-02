@@ -13,6 +13,8 @@
 #include "mod-ollama-chat_topics.h"
 #include "mod-ollama-chat-utilities.h"
 #include <fmt/core.h>
+#include <algorithm>
+#include <cmath>
 #include <sstream>
 #include <fstream>
 
@@ -52,6 +54,9 @@ std::string g_OllamaUrl        = "http://localhost:11434/api/generate";
 std::string g_OllamaModel      = "llama3.2:1b";
 std::string g_UtilityUrl;
 std::string g_UtilityModel;
+std::string g_ReplyUrl;
+std::string g_ReplyModel;
+uint32_t    g_ReplyNumPredict = 0;
 uint32_t    g_OllamaNumPredict = 40;
 float       g_OllamaTemperature = 0.8f;
 float       g_OllamaTopP = 0.95f;
@@ -496,6 +501,22 @@ bool g_ChatterUseGuildRecruitmentChannel  = false;
 // --------------------------------------------
 // Typing Simulation Settings
 // --------------------------------------------
+bool     g_BlacklistMastersOnly       = false;
+bool     g_TemplateEscapes            = false;
+std::string g_RoleplayVoicePreamble;
+
+bool     g_ConversationEnable         = false;
+uint32_t g_ConversationHoldSeconds    = 120;
+float    g_ConversationMaxDistance    = 25.0f;
+bool     g_ConversationHoldStill      = true;
+
+bool     g_DeliverySplit              = false;
+uint32_t g_DeliveryMaxMessageBytes    = 255;
+uint32_t g_DeliveryMaxMessages        = 3;
+uint32_t g_DeliveryPauseBaseMs        = 1200;
+uint32_t g_DeliveryPausePerCharMs     = 30;
+uint32_t g_DeliveryPauseMaxMs         = 6000;
+
 bool g_EnableTypingSimulation = false;
 uint32_t g_TypingSimulationBaseDelay = 1000;     // 1000ms base delay
 uint32_t g_TypingSimulationDelayPerChar = 250;
@@ -597,7 +618,13 @@ void LoadOllamaChatConfig()
     // model means no lane at all and every kind keeps the model above.
     g_UtilityUrl                      = sConfigMgr->GetOption<std::string>("OllamaChat.Utility.Url", "");
     g_UtilityModel                    = sConfigMgr->GetOption<std::string>("OllamaChat.Utility.Model", "");
-    g_OllamaNumPredict                = sConfigMgr->GetOption<uint32_t>("OllamaChat.NumPredict", 40);
+
+    // The person lane: replies to a line a real player said. Empty model means
+    // no lane, and those replies keep the model above like everything else.
+    g_ReplyUrl                        = sConfigMgr->GetOption<std::string>("OllamaChat.Reply.Url", "");
+    g_ReplyModel                      = sConfigMgr->GetOption<std::string>("OllamaChat.Reply.Model", "");
+    g_ReplyNumPredict                 = sConfigMgr->GetOption<uint32_t>("OllamaChat.Reply.NumPredict", 0);
+    g_OllamaNumPredict               = sConfigMgr->GetOption<uint32_t>("OllamaChat.NumPredict", 40);
     g_OllamaTemperature               = sConfigMgr->GetOption<float>("OllamaChat.Temperature", 0.8f);
     g_OllamaTopP                      = sConfigMgr->GetOption<float>("OllamaChat.TopP", 0.95f);
     g_OllamaRepeatPenalty             = sConfigMgr->GetOption<float>("OllamaChat.RepeatPenalty", 1.1f);
@@ -902,6 +929,7 @@ void LoadOllamaChatConfig()
     g_RoleplayEnable                  = sConfigMgr->GetOption<bool>("OllamaChat.Roleplay.Enable", false);
     g_RoleplayStrictness              = static_cast<uint8_t>(sConfigMgr->GetOption<uint32_t>("OllamaChat.Roleplay.Strictness", 1));
     g_RoleplayUseRaceVoice            = sConfigMgr->GetOption<bool>("OllamaChat.Roleplay.UseRaceVoice", true);
+    g_RoleplayVoicePreamble           = sConfigMgr->GetOption<std::string>("OllamaChat.Roleplay.VoicePreamble", "");
     g_RoleplayUseClassVoice           = sConfigMgr->GetOption<bool>("OllamaChat.Roleplay.UseClassVoice", true);
     g_RoleplayFactionAttitude         = sConfigMgr->GetOption<bool>("OllamaChat.Roleplay.FactionAttitude", true);
     g_RoleplayBlockMetaTerms          = sConfigMgr->GetOption<bool>("OllamaChat.Roleplay.BlockMetaTerms", true);
@@ -949,6 +977,25 @@ void LoadOllamaChatConfig()
     }
 
     // Typing Simulation
+    // Conversation mode: a bot someone is talking to stays with them.
+    g_ConversationEnable              = sConfigMgr->GetOption<bool>("OllamaChat.Conversation.Enable", false);
+    g_ConversationHoldSeconds         = sConfigMgr->GetOption<uint32_t>("OllamaChat.Conversation.HoldSeconds", 120);
+    g_ConversationMaxDistance         = sConfigMgr->GetOption<float>("OllamaChat.Conversation.MaxDistance", 25.0f);
+    g_ConversationHoldStill           = sConfigMgr->GetOption<bool>("OllamaChat.Conversation.HoldStill", true);
+    g_ConversationHoldSeconds = std::clamp<uint32_t>(g_ConversationHoldSeconds, 10, 3600);
+    g_ConversationMaxDistance = std::isfinite(g_ConversationMaxDistance)
+        ? std::clamp(g_ConversationMaxDistance, 5.0f, 100.0f) : 25.0f;
+
+    // A long answer as several chat lines, spaced like someone still talking.
+    g_DeliverySplit                   = sConfigMgr->GetOption<bool>("OllamaChat.Delivery.Split", false);
+    g_DeliveryMaxMessageBytes         = sConfigMgr->GetOption<uint32_t>("OllamaChat.Delivery.MaxMessageBytes", 255);
+    g_DeliveryMaxMessages             = sConfigMgr->GetOption<uint32_t>("OllamaChat.Delivery.MaxMessages", 3);
+    g_DeliveryPauseBaseMs             = sConfigMgr->GetOption<uint32_t>("OllamaChat.Delivery.PauseBaseMs", 1200);
+    g_DeliveryPausePerCharMs          = sConfigMgr->GetOption<uint32_t>("OllamaChat.Delivery.PausePerCharMs", 30);
+    g_DeliveryPauseMaxMs              = sConfigMgr->GetOption<uint32_t>("OllamaChat.Delivery.PauseMaxMs", 6000);
+    if (g_DeliveryMaxMessageBytes < 32 || g_DeliveryMaxMessageBytes > 255)
+        g_DeliveryMaxMessageBytes = 255;
+
     g_EnableTypingSimulation          = sConfigMgr->GetOption<bool>("OllamaChat.EnableTypingSimulation", false);
     g_TypingSimulationBaseDelay       = sConfigMgr->GetOption<uint32_t>("OllamaChat.TypingSimulationBaseDelay", 1000);
     g_TypingSimulationDelayPerChar    = sConfigMgr->GetOption<uint32_t>("OllamaChat.TypingSimulationDelayPerChar", 250);
@@ -971,6 +1018,7 @@ void LoadOllamaChatConfig()
 
 
     g_SkipMasterCommands = sConfigMgr->GetOption<bool>("OllamaChat.SkipMasterCommands", true);
+    g_BlacklistMastersOnly = sConfigMgr->GetOption<bool>("OllamaChat.BlacklistMastersOnly", false);
 
     // Load extra blacklist commands from config (comma-separated list)
     std::string extraBlacklist = sConfigMgr->GetOption<std::string>("OllamaChat.BlacklistCommands", "");
@@ -982,11 +1030,6 @@ void LoadOllamaChatConfig()
             g_BlacklistCommands.push_back(cmd);
         }
     }
-
-    // Publish the endpoint settings for worker threads. They must never read
-    // the g_Ollama* globals directly -- reassigning those here would free the
-    // buffers under a worker mid-request.
-    OllamaConfig_Publish();
 
     LoadPersonalityTemplatesFromDB();
 
@@ -1329,6 +1372,43 @@ void LoadOllamaChatConfig()
     g_DisableForGuild = sConfigMgr->GetOption<bool>("OllamaChat.DisableForGuild", false);
     g_DisableForParty = sConfigMgr->GetOption<bool>("OllamaChat.DisableForParty", false);
 
+    // AzerothCore's config parser hands values over verbatim (and strips every
+    // double quote), so a "\n" written in a template reaches the model as a
+    // backslash and an n: history lines, the snapshot and the memory prompts
+    // all ran together. With TemplateEscapes on, \n and \t in the prompt
+    // templates become real line breaks and tabs.
+    g_TemplateEscapes = sConfigMgr->GetOption<bool>("OllamaChat.TemplateEscapes", false);
+    if (g_TemplateEscapes)
+    {
+        auto unescape = [](std::string& s)
+        {
+            std::string out;
+            out.reserve(s.size());
+            for (size_t i = 0; i < s.size(); ++i)
+            {
+                if (s[i] == '\\' && i + 1 < s.size() && (s[i + 1] == 'n' || s[i + 1] == 't'))
+                {
+                    out += s[i + 1] == 'n' ? '\n' : '\t';
+                    ++i;
+                }
+                else
+                {
+                    out += s[i];
+                }
+            }
+            s = std::move(out);
+        };
+        for (std::string* t : { &g_OllamaSystemPrompt, &g_RandomChatterPromptTemplate, &g_EventChatterPromptTemplate,
+                                &g_ChatPromptTemplate, &g_ChatExtraInfoTemplate, &g_ChatHistoryHeaderTemplate,
+                                &g_ChatHistoryLineTemplate, &g_ChatHistoryFooterTemplate, &g_ChatBotSnapshotTemplate,
+                                &g_SentimentAnalysisPrompt, &g_SentimentPromptTemplate, &g_RAGPromptTemplate,
+                                &g_MemoryCondensePrompt, &g_MemoryPromptTemplate, &g_MemoryEventPrompt,
+                                &g_RelationshipUpdatePrompt, &g_RelationshipPromptTemplate,
+                                &g_EmoteReactionPromptTemplate, &g_AddresseePromptTemplate, &g_InitiateDirective,
+                                &g_HeldTonguePrompt, &g_RoleplayVoicePreamble, &g_MemorySystemPrompt })
+            unescape(*t);
+    }
+
     LOG_INFO("server.loading",
              "[Ollama Chat] Config loaded: Enabled = {}, SayDistance = {}, YellDistance = {}, "
              "Reply Chances - Say: P{}%/B{}%, Channel: P{}%/B{}%, Party: P{}%/B{}%, Guild: P{}%/B{}%, MaxBotsToPick = {}, "
@@ -1343,6 +1423,10 @@ void LoadOllamaChatConfig()
              g_OllamaUrl, g_OllamaModel, g_MaxConcurrentQueries,
              g_EnableRandomChatter, g_MinRandomInterval, g_MaxRandomInterval, g_RandomChatterRealPlayerDistance,
              g_RandomChatterBotCommentChance, g_MaxConcurrentQueries, extraBlacklist);
+
+    // Publish only after all options and prompt normalization are complete.
+    // Workers never read mutable config strings or delivery settings directly.
+    OllamaConfig_Publish();
 }
 
 void LoadPersonalityTemplatesFromDB()

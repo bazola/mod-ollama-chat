@@ -265,6 +265,7 @@ void OllamaConfig_Publish()
     OllamaEndpointSettings next;
     next.url              = g_OllamaUrl;
     next.model            = g_OllamaModel;
+    next.memorySystemPrompt = g_MemorySystemPrompt;
     next.systemPrompt     = g_OllamaSystemPrompt;
     next.stop             = g_OllamaStop;
     next.seed             = g_OllamaSeed;
@@ -280,6 +281,15 @@ void OllamaConfig_Publish()
     next.frequencyPenalty = g_OllamaFrequencyPenalty;
     next.utilityUrl       = g_UtilityUrl;
     next.utilityModel     = g_UtilityModel;
+    next.replyUrl         = g_ReplyUrl;
+    next.replyModel       = g_ReplyModel;
+    next.replyNumPredict  = g_ReplyNumPredict;
+    next.typingSimulation = g_EnableTypingSimulation;
+    next.deliverySplit = g_DeliverySplit;
+    next.deliveryMaxMessageBytes = g_DeliveryMaxMessageBytes;
+    next.typingBaseDelay = g_TypingSimulationBaseDelay;
+    next.typingDelayPerChar = g_TypingSimulationDelayPerChar;
+    next.typingMaxDelay = g_TypingSimulationMaxDelay;
 
     std::lock_guard<std::mutex> lock(g_settingsMutex);
     g_settings = std::move(next);
@@ -291,7 +301,7 @@ OllamaEndpointSettings OllamaConfig_Snapshot()
     return g_settings;
 }
 
-OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, uint64_t voiceGuid)
+OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, uint64_t voiceGuid, OllamaLane lane)
 {
     OllamaApiResult result;
 
@@ -305,7 +315,7 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, u
 
     // A bot's own notes are not spoken in the world, so they do not get the world's framing (plan 58).
     if (kind == OllamaRequestKind::MemoryNote)
-        cfg.systemPrompt = g_MemorySystemPrompt;
+        cfg.systemPrompt = cfg.memorySystemPrompt;
 
     // This character's own small offset from the shared sampling distribution.
     // Applied to the local copy only, and PerformOnce takes cfg by reference all
@@ -316,12 +326,24 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, u
     // Done here rather than in BuildRequest so the url moves with the model:
     // PerformOnce posts to cfg.url, so both have to change together or the
     // lane's model name is sent to the voice model's backend.
-    const bool routed = (kind == OllamaRequestKind::Classify) && !cfg.utilityModel.empty();
-    if (routed)
+    const bool toUtility = (kind == OllamaRequestKind::Classify) && !cfg.utilityModel.empty();
+    const bool toPerson  = !toUtility && lane == OllamaLane::Person && !cfg.replyModel.empty();
+    const bool routed    = toUtility || toPerson;
+    if (toUtility)
     {
         cfg.model = cfg.utilityModel;
         if (!cfg.utilityUrl.empty())
             cfg.url = cfg.utilityUrl;
+    }
+    else if (toPerson)
+    {
+        // The person lane is another model too, so the same rule holds: the url
+        // moves with it, and nothing learned here is about the voice model.
+        cfg.model = cfg.replyModel;
+        if (!cfg.replyUrl.empty())
+            cfg.url = cfg.replyUrl;
+        if (cfg.replyNumPredict > 0)
+            cfg.numPredict = cfg.replyNumPredict;
     }
 
     // One place decides what the "think" field should be: policy for this
@@ -337,7 +359,9 @@ OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, u
     // Reasoning tokens come out of the same num_predict budget as the answer.
     // Reserve headroom whenever we expect them -- because reasoning was asked
     // for, or because this model produces it regardless.
-    const bool expectReasoning = think.wanted || OllamaCapability_ReasonsUnconditionally();
+    // Preserve the utility lane's existing reserve policy. Only the optional
+    // person lane bypasses the voice model's reasoning headroom.
+    const bool expectReasoning = !toPerson && (think.wanted || OllamaCapability_ReasonsUnconditionally());
     const uint32_t reserve     = expectReasoning ? g_ReasoningTokenReserve : 0;
 
     // Every attempt goes through here so a refused reasoning level self-heals

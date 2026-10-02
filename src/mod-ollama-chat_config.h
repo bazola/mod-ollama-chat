@@ -50,6 +50,12 @@ extern std::string g_OllamaModel;
 // means the lane shares g_OllamaUrl.
 extern std::string g_UtilityUrl;
 extern std::string g_UtilityModel;
+// The person lane, for replies to a line a real player said: often worth a
+// stronger model than ambient chatter. Empty model = no lane; empty url = the
+// lane shares g_OllamaUrl; NumPredict 0 = use g_OllamaNumPredict.
+extern std::string g_ReplyUrl;
+extern std::string g_ReplyModel;
+extern uint32_t    g_ReplyNumPredict;
 extern uint32_t    g_OllamaNumPredict;
 extern float       g_OllamaTemperature;
 extern float       g_OllamaTopP;
@@ -289,6 +295,8 @@ extern uint32_t g_SnapshotMaxPlayers;
 extern bool        g_RoleplayEnable;
 extern uint8_t     g_RoleplayStrictness;
 extern bool        g_RoleplayUseRaceVoice;
+// Said once before the race and class voices, when either is used. Empty = none.
+extern std::string g_RoleplayVoicePreamble;
 extern bool        g_RoleplayUseClassVoice;
 extern bool        g_RoleplayFactionAttitude;
 extern bool        g_RoleplayBlockMetaTerms;
@@ -453,6 +461,10 @@ extern bool        g_QuestWordsEnable;
 extern std::string g_QuestWordsEra;
 // Orders from a bot's master (plan 21 P7): no in-character reply to what mod-playerbots runs as a command.
 extern bool        g_SkipMasterCommands;
+// BlacklistCommands only silences the bots the speaker is master of.
+extern bool        g_BlacklistMastersOnly;
+// \n and \t in prompt templates become real line breaks and tabs.
+extern bool        g_TemplateEscapes;
 extern uint32_t    g_RelationshipMaxLength;
 extern std::string g_RelationshipUpdatePrompt;
 extern std::string g_RelationshipPromptTemplate;
@@ -618,6 +630,27 @@ extern bool g_EnableTypingSimulation;
 extern uint32_t g_TypingSimulationBaseDelay;      // Base delay in milliseconds
 extern uint32_t g_TypingSimulationDelayPerChar;   // Delay per character in milliseconds
 extern uint32_t g_TypingSimulationMaxDelay;       // Ceiling, so a long reply is not lost
+
+// --------------------------------------------
+// Conversation mode: a bot someone speaks to face to face stops, turns to them
+// and answers their follow-ups until they fall silent or walk away. See
+// mod-ollama-chat_conversation.h.
+// --------------------------------------------
+extern bool     g_ConversationEnable;
+extern uint32_t g_ConversationHoldSeconds;   // silence before the bot moves on (min 10)
+extern float    g_ConversationMaxDistance;   // yards; further than this ends it
+extern bool     g_ConversationHoldStill;     // pause the bot's AI and movement while engaged
+
+// --------------------------------------------
+// Multi-message delivery: a reply longer than one chat message goes out as
+// several, split at sentence ends and spaced by a pause that grows with length.
+// --------------------------------------------
+extern bool     g_DeliverySplit;
+extern uint32_t g_DeliveryMaxMessageBytes;   // 32..255; WoW's chat box limit is 255
+extern uint32_t g_DeliveryMaxMessages;       // 0 = no limit
+extern uint32_t g_DeliveryPauseBaseMs;
+extern uint32_t g_DeliveryPausePerCharMs;
+extern uint32_t g_DeliveryPauseMaxMs;
 
 // --------------------------------------------
 // Loader Functions

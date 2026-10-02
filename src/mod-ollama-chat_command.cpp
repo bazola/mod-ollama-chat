@@ -77,7 +77,7 @@ bool OllamaChatConfigCommand::HandleOllamaReloadCommand(ChatHandler* handler)
     }
 
     LoadBotPersonalityList();
-    LoadBotConversationHistoryFromDB();
+    // Settings reloads must retain unsaved turns; history is loaded only at startup.
     InitializeSentimentTracking();
     handler->SendSysMessage("OllamaChat: Configuration reloaded from conf!");
     return true;

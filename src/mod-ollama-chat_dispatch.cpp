@@ -210,7 +210,7 @@ namespace
     {
         // The speaker's guid rides along so this character can have its own
         // sampling offset (plan 49 item 3c); it is inert until the conf enables it.
-        OllamaApiResult api = QueryOllama(task.request.prompt, task.request.kind, task.request.botGuid);
+        OllamaApiResult api = QueryOllama(task.request.prompt, task.request.kind, task.request.botGuid, task.request.lane);
 
         if (!api.ok)
         {
@@ -249,16 +249,22 @@ namespace
 
         Completion completion;
         completion.request = task.request;
-        completion.text    = std::move(text);
         completion.emoteId = emoteId;
 
+        completion.text = std::move(text);
+
+        const OllamaEndpointSettings delivery = OllamaConfig_Snapshot();
         uint32_t delayMs = 0;
-        if (g_EnableTypingSimulation)
+        if (delivery.typingSimulation)
         {
-            delayMs = g_TypingSimulationBaseDelay +
-                      static_cast<uint32_t>(completion.text.length()) * g_TypingSimulationDelayPerChar;
-            if (g_TypingSimulationMaxDelay > 0 && delayMs > g_TypingSimulationMaxDelay)
-                delayMs = g_TypingSimulationMaxDelay;
+            // Typing covers the first message; the rest are paced as they go out.
+            const size_t typed = delivery.deliverySplit
+                ? std::min<size_t>(completion.text.length(), delivery.deliveryMaxMessageBytes)
+                : completion.text.length();
+            delayMs = delivery.typingBaseDelay +
+                      static_cast<uint32_t>(typed) * delivery.typingDelayPerChar;
+            if (delivery.typingMaxDelay > 0 && delayMs > delivery.typingMaxDelay)
+                delayMs = delivery.typingMaxDelay;
         }
 
         // Whatever the caller asked to be held back on top of that -- the group

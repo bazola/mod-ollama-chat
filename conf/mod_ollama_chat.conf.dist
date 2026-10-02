@@ -57,6 +57,25 @@ OllamaChat.Model = llama3.2:1b
 OllamaChat.Utility.Url =
 OllamaChat.Utility.Model =
 
+# OllamaChat.Reply.Url / OllamaChat.Reply.Model / OllamaChat.Reply.NumPredict
+#   Description: The person lane, for replies to something a real player said
+#                (a say, whisper, party line or emote aimed at a bot). Those are
+#                the lines someone is actually reading and waiting on, so they
+#                can be worth a stronger model than the ambient chatter that
+#                makes up most of the traffic. Bots answering bots stay on
+#                OllamaChat.Model.
+#   Url:        Optional. Empty means the lane shares OllamaChat.Url.
+#   Model:      Empty (the default) means there is no lane and replies keep
+#               using OllamaChat.Model, so nothing changes until this is set.
+#   NumPredict: Token cap for the lane. 0 (the default) keeps
+#               OllamaChat.NumPredict. Raise it with multi-message delivery
+#               (OllamaChat.Delivery.*) so longer answers are not cut short.
+#   Note:       Like the cheap lane, a routed request never thinks: the
+#               think-capability probe describes OllamaChat.Model only.
+OllamaChat.Reply.Url =
+OllamaChat.Reply.Model =
+OllamaChat.Reply.NumPredict = 0
+
 # OllamaChat.NumPredict
 #     Description: Maximum number of tokens to generate in Ollama responses.
 #     0 = unlimited. Only set if you want a hard cap.
@@ -149,6 +168,15 @@ OllamaChat.Stop =
 #     Example:     OllamaChat.SystemPrompt = "Always answer as if you are a WoW quest giver."
 #     Default:     (empty)
 OllamaChat.SystemPrompt =
+
+# OllamaChat.TemplateEscapes
+#     Description: The config parser passes values through verbatim -- and strips every double quote -- so a
+#                  "\n" written in a template reaches the model as a backslash followed by an n, and history
+#                  lines, the snapshot and memory prompts run together on one line. 1 turns \n and \t in the
+#                  prompt templates and prompts into real line breaks and tabs. Double quotes are still
+#                  stripped by the core; write examples without them.
+#     Default:     0
+OllamaChat.TemplateEscapes = 0
 
 # OllamaChat.Seed
 #     Description: Optional. Random seed for deterministic generation. Set to a number for repeatable results, or leave blank for normal random output.
@@ -320,10 +348,21 @@ OllamaChat.Places.Era = classic
 OllamaChat.QuestWords.Enable = 0
 OllamaChat.QuestWords.Era = classic
 
+# OllamaChat.BlacklistMastersOnly
+#     Description: 0 = a message starting with any BlacklistCommands prefix gets no reply from any bot.
+#                  1 = it is taken as a command only by the bots the speaker is master of; every other bot
+#                  still answers. The list is full of ordinary words ("who", "wait", "look", "help", "go",
+#                  "do", "talk"), so with 0 a person without bots of their own cannot start a sentence
+#                  with them -- "who are you?" draws silence. Only a bot's master can order it, so 1 costs
+#                  nothing in the case the list exists for.
+#     Default:     0
+OllamaChat.BlacklistMastersOnly = 0
+
 # OllamaChat.BlacklistCommands
 #     Description: A comma-separated list of command prefixes that should be ignored by AI bots.
 #                  If a message starts with any of these prefixes, the bot will not respond.
-#     Default:     
+#                  See BlacklistMastersOnly for which bots that applies to.
+#     Default:
 OllamaChat.BlacklistCommands = autogear,talents,reset botAI,summon,release,revive,leave,attack,follow,flee,stay,runaway,grind,disperse,give leader,spells,cast ,quests,accept,drop,talk,reset,ss ,trainer,rti,rtsc,do ,ll ,e ,ue ,nc ,open,destroy,s ,b ,bank,gb ,u ,co ,ELVUI_VERSIONCHK,Asked,DPSMate_,LibGroupTalents,BLT,oRA3,Skada,HealBot,hbComms,questie,pfQuest,DBMv4-Ver,BWVQ3,add,remove,reset ai,report,state,help,log,stats,tank,offtank,healer,cc ,damage,boost,passive,defensive,aggressive,stay,guard,free,follow,assist,pet,stance,formation,rpg,emote,cheer,applaud,drink,eat,dance,attackers,reset instances,home,zone,who ,pos ,tele,grind,loot,quest,trainer,travel,teleport,homebind,unfollow,invite,uninvite,join,leave,leader,ready,release,save,update,reset talents,gear,trade,mail,ah ,ahscan,ahbid,ahbuy,ahsell,ahcancel,bag,repair,vendor,train,spells,reset spells,learn,unlearn,cast,uncast,use ,move,go ,look,stop,turn,face,wait,party,followleader,stayleader,moveleader,info,distance,debug,reset path,reset state,reset all,reset dungeon,reset raid,zone info,LHC40,RECOUNT,GTFO_v,Altoholic,DS_,DataStore
 
 # OllamaChat.SayDistance
@@ -491,6 +530,75 @@ OllamaChat.TypingSimulationBaseDelay = 1000
 #                  - 100ms per char = 10 chars/sec (professional)
 #     Default:     250
 OllamaChat.TypingSimulationDelayPerChar = 250
+
+# --------------------------------------------
+# CONVERSATION MODE
+# --------------------------------------------
+
+# OllamaChat.Conversation.Enable
+#     Description: A person who speaks to a bot face to face (say or yell) holds its attention. The bot stops
+#                  as soon as it decides to answer, turns to them, and their following say/yell lines go to
+#                  it and only it -- no reply roll, no addressee pass -- unless they name another bot. It
+#                  lets go after HoldSeconds of silence, when they move out of MaxDistance or change map,
+#                  and at once if the bot is drawn into combat. Bots in any group or with a master other
+#                  than themselves are never engaged or held, but can still reply while doing their normal
+#                  tasks. Only bots at full health can be held; any damage, joining a group or acquiring
+#                  a master releases a hold on the next world update. Whispers and party chat are unaffected.
+#     Default:     0 (off)
+OllamaChat.Conversation.Enable = 0
+
+# OllamaChat.Conversation.HoldSeconds
+#     Description: How long after the person's last line (or the bot's last answer landing, whichever is
+#                  later) the bot waits before going back to what it was doing. Minimum 10.
+#     Default:     120
+OllamaChat.Conversation.HoldSeconds = 120
+
+# OllamaChat.Conversation.MaxDistance
+#     Description: Yards. A conversation starts only within this range and ends when the two are further
+#                  apart than this.
+#     Default:     25
+OllamaChat.Conversation.MaxDistance = 25
+
+# OllamaChat.Conversation.HoldStill
+#     Description: 1 = the engaged bot's AI is paused and its movement stopped, so it stands and faces the
+#                  person. 0 = only the routing and pacing apply, and the bot goes on moving as it was.
+#     Default:     1
+OllamaChat.Conversation.HoldStill = 1
+
+# --------------------------------------------
+# MULTI-MESSAGE DELIVERY
+# --------------------------------------------
+
+# OllamaChat.Delivery.Split
+#     Description: Send a reply longer than one chat message as several, the way a person keeps talking
+#                  instead of stopping at the chat box's edge. The reply is split at sentence ends (at a
+#                  word boundary when one sentence is itself too long). The first message goes out as
+#                  usual; each later one follows after a pause that grows with its length. Repetition
+#                  checks, conversation history and the bots who overhear it all see the whole reply once.
+#                  Pair with a larger OllamaChat.MaxReplyLength (and OllamaChat.Reply.NumPredict for the
+#                  person lane) so there is more than one message's worth to say.
+#     Default:     0 (off: a reply is one message, however long)
+OllamaChat.Delivery.Split = 0
+
+# OllamaChat.Delivery.MaxMessageBytes
+#     Description: Largest single message, in bytes. WoW's chat box holds 255; values outside 32..255
+#                  fall back to 255.
+#     Default:     255
+OllamaChat.Delivery.MaxMessageBytes = 255
+
+# OllamaChat.Delivery.MaxMessages
+#     Description: Most messages one reply may become. Anything past the last is dropped at a sentence
+#                  end. 0 = no limit.
+#     Default:     3
+OllamaChat.Delivery.MaxMessages = 3
+
+# OllamaChat.Delivery.PauseBaseMs / OllamaChat.Delivery.PausePerCharMs / OllamaChat.Delivery.PauseMaxMs
+#     Description: The pause before each later message: PauseBaseMs + PausePerCharMs per character of that
+#                  message, capped at PauseMaxMs (0 = no cap).
+#     Default:     1200, 30, 6000
+OllamaChat.Delivery.PauseBaseMs = 1200
+OllamaChat.Delivery.PausePerCharMs = 30
+OllamaChat.Delivery.PauseMaxMs = 6000
 
 # --------------------------------------------
 # RP PERSONALITIES SYSTEM
@@ -1856,6 +1964,15 @@ OllamaChat.Roleplay.UseRaceVoice = 1
 #        sees wounds, a hunter reads tracks and terrain, a rogue counts exits.
 #        Default: 1
 OllamaChat.Roleplay.UseClassVoice = 1
+
+#    OllamaChat.Roleplay.VoicePreamble
+#        Said once, just before the race and class voices, when either is in the prompt. Those voices are
+#        written for everyone of a race or class and read as orders ("You are rarely sentimental"), so
+#        they overrule a character's own written temperament. A preamble can put them in their place:
+#        for example "Habits of speech common among your people and calling, which colour but never
+#        override the nature described earlier:". Empty = nothing is added.
+#        Default: (empty)
+OllamaChat.Roleplay.VoicePreamble =
 
 #    OllamaChat.Roleplay.FactionAttitude
 #        Bots speak as loyal to their own faction and wary of the other.

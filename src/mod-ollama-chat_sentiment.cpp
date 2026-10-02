@@ -261,6 +261,12 @@ void SaveBotPlayerSentimentsToDB()
 
 void InitializeSentimentTracking()
 {
+    // Called at startup and config reload. Loading again would discard dirty
+    // sentiment changes, so initialize only on the first enabled call.
+    static bool initialized = false;
+    if (initialized)
+        return;
+
     if (!g_EnableSentimentTracking)
     {
         LOG_INFO("module.ollamachat", "[Ollama Chat] Sentiment tracking is disabled");
@@ -271,6 +277,7 @@ void InitializeSentimentTracking()
     
     // Load existing sentiment data from database
     LoadBotPlayerSentimentsFromDB();
+    initialized = true;
     
     // Initialize the last save time
     g_LastSentimentSaveTime = time(nullptr);

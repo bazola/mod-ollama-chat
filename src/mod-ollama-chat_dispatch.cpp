@@ -1,6 +1,7 @@
 #include "mod-ollama-chat_dispatch.h"
 #include "mod-ollama-chat_api.h"
 #include "mod-ollama-chat_config.h"
+#include "mod-ollama-chat_conversation.h"
 #include "mod-ollama-chat_expression.h"
 #include "mod-ollama-chat_governor.h"
 #include "mod-ollama-chat_memory.h"
@@ -1195,6 +1196,12 @@ namespace
                 // random voice (plan 25 item 54).
                 Governor_NoteThreadHolder(botGuid, ObjectGuid(c.request.targetGuid),
                                           c.request.scopeKey);
+
+                // Conversation mode: the hold runs from the answer landing, so
+                // a person reading a long reply is not timed out mid-read.
+                if (c.request.lane == OllamaLane::Person &&
+                    (c.request.source == SRC_SAY_LOCAL || c.request.source == SRC_YELL_LOCAL))
+                    Conversation_Refresh(bot, addressee);
             }
         }
 
@@ -1531,6 +1538,8 @@ void OllamaChat_DispatchEmoteReaction(Player* bot, Player* player, uint32_t text
     request.chainDepth = 0;
     request.botName    = bot->GetName();
     request.kind       = OllamaRequestKind::EventChatter;
+    // Only a person emotes at a bot by name, and they are waiting on this.
+    request.lane       = OllamaLane::Person;
     // Party lines key on the GROUP, exactly as they do in ProcessChat and in event chatter -- keying
     // them on the zone puts the reply in a different conversation space from the party chat it was
     // said in, so it counts for no cooldown, no repetition history and no thread.

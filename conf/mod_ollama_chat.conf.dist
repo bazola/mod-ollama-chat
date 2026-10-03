@@ -348,6 +348,42 @@ OllamaChat.Places.Era = classic
 OllamaChat.QuestWords.Enable = 0
 OllamaChat.QuestWords.Era = classic
 
+# OllamaChat.Director.Enable
+# OllamaChat.Director.RefreshSeconds
+#     Description: Local patch (custom wow plan 62). The Dungeon Master's scene channel: lines written by
+#                  custom-wow services/dm/dm.py into dm_line, spoken by the world as an NPC. Enable is the
+#                  kill switch for every scene. RefreshSeconds is how often dm_line is loaded, on its own
+#                  thread; a line written for a party after it walks into a dungeon has to be loaded long
+#                  before the party reaches the boss, so this is shorter than the regard timer. An absent
+#                  table is silently a no-op.
+#     Default:     0, 10
+OllamaChat.Director.Enable = 0
+OllamaChat.Director.RefreshSeconds = 10
+
+# OllamaChat.Director.BossScene
+# OllamaChat.Director.BossRange
+# OllamaChat.Director.BossFallback
+#     Description: A dungeon's final boss (the encounter DungeonEncounter.dbc marks as the last) yells one
+#                  line, once per instance, when a real player comes within BossRange yards (10-100) and in
+#                  sight of it, alive and out of combat. Raids are left alone. The line written for this
+#                  instance's party is preferred; with BossFallback on, a line written for anyone is spoken
+#                  when none was. Delivery is recorded in ledger_event as dm_scene when mod-ledger is built.
+#     Default:     0, 45, 1
+OllamaChat.Director.BossScene = 0
+OllamaChat.Director.BossRange = 45
+OllamaChat.Director.BossFallback = 1
+
+# OllamaChat.Director.AnswerBots
+# OllamaChat.Director.AnswerEventType
+#     Description: When a scene is spoken in front of a real player, bots in that player's party who heard it
+#                  remember the words, and AnswerBots of them (0-4) answer in party chat through the event
+#                  prompt (OllamaChat.EventChatterPromptTemplate), which reads it as
+#                  "Event: <speaker> <AnswerEventType> "<words>"". No chance roll and no event cooldown: the
+#                  boss spoke once, to them. The governor still applies. Needs EnableEventChatter.
+#     Default:     1, "called out to your party as you came into sight, before any blow was struck:"
+OllamaChat.Director.AnswerBots = 1
+OllamaChat.Director.AnswerEventType = "called out to your party as you came into sight, before any blow was struck:"
+
 # OllamaChat.BlacklistMastersOnly
 #     Description: 0 = a message starting with any BlacklistCommands prefix gets no reply from any bot.
 #                  1 = it is taken as a command only by the bots the speaker is master of; every other bot

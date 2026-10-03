@@ -5,6 +5,7 @@
 #include "mod-ollama-chat_command.h"
 #include "mod-ollama-chat_expression.h"
 #include "mod-ollama-chat_rag.h"
+#include "mod-ollama-chat_director.h"
 #include "Log.h"
 
 void Addmod_ollama_chatScripts()
@@ -33,6 +34,11 @@ void Addmod_ollama_chatScripts()
 
     // Bots react when a player emotes at them.
     new ChatOnEmote();
+
+    // The Dungeon Master's scene channel (plan 62).
+    new OllamaDirectorWorldScript();
+    new OllamaDirectorPlayerScript();
+    new OllamaDirectorMapScript();
 
     new OllamaChatConfigCommand();
 }

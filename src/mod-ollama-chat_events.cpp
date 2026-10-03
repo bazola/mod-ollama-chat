@@ -485,6 +485,78 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
     return prompt;
 }
 
+void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, std::string const& words)
+{
+    if (!witness || !witness->IsInWorld() || words.empty())
+        return;
+
+    // Remembered whether or not anyone answers, like every witnessed deed. Cut short: it is a memory of
+    // being threatened, not a transcript, and a long quote is what the echo filter exists to throw out.
+    std::string quoted = words.size() > 140 ? words.substr(0, words.rfind(' ', 140)) + "..." : words;
+    BroadcastEventMemory(witness, SafeFormat("{} called out to us before the fight: \"{}\"", speakerName, quoted),
+                         g_EventChatterRealPlayerDistance);
+
+    if (!g_Enable || !g_EnableEventChatter || g_DirectorAnswerBots == 0 || g_DisableForParty)
+        return;
+
+    Group* group = witness->GetGroup();
+    if (!group)
+        return;
+
+    std::vector<Player*> candidates;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* bot = ref->GetSource();
+        if (!bot || bot == witness || !bot->IsInWorld() || !bot->IsAlive() || bot->GetMap() != witness->GetMap())
+            continue;
+        if (!bot->IsWithinDist(witness, g_EventChatterRealPlayerDistance, false))
+            continue;
+        PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+        if (ai && ai->IsBotAI())
+            candidates.push_back(bot);
+    }
+
+    Acore::Containers::RandomShuffle(candidates);
+
+    uint32_t queued = 0;
+    for (Player* bot : candidates)
+    {
+        // No chance roll and no event cooldown: the boss spoke once, to them, and someone answering is the
+        // scene. The governor still has the last word, so it cannot pile onto a party already talking.
+        const uint32_t scope = group->GetGUID().GetCounter();
+        const std::string scopeKey = Governor_MakeScopeKey(ChatChannelSourceLocalStr[SRC_PARTY_LOCAL], 0, "", 0, scope);
+        if (!Governor_CanSend(bot->GetGUID(), scopeKey))
+            continue;
+
+        uint32_t maxWords = 0;
+        std::string prompt = eventChatter.BuildPrompt(bot, g_EventChatterPromptTemplate, g_DirectorAnswerEventType,
+                                                      "\"" + words + "\"", speakerName, &maxWords);
+        if (prompt.empty())
+            continue;
+
+        OllamaChatRequest request;
+        request.botGuid     = bot->GetGUID().GetRawValue();
+        request.targetGuid  = 0;
+        request.source      = SRC_PARTY_LOCAL;
+        request.chainDepth  = 0;
+        request.scopeKey    = scopeKey;
+        request.prompt      = std::move(prompt);
+        request.botName     = bot->GetName();
+        request.kind        = OllamaRequestKind::EventChatter;
+        request.maxWords    = maxWords;
+        request.triggerBotReplies = true;
+
+        if (!OllamaDispatch_Submit(std::move(request)))
+            continue;
+
+        if (++queued >= g_DirectorAnswerBots)
+            break;
+    }
+
+    if (g_DebugEnabled)
+        LOG_INFO("module.ollamachat", "[Ollama Chat] Director: {} answer(s) queued to {}", queued, speakerName);
+}
+
 // ==========================================================================
 // Script hooks
 // ==========================================================================

@@ -459,6 +459,21 @@ extern std::string g_PlacesEra;
 // which is the intended fallback -- never the raw title.
 extern bool        g_QuestWordsEnable;
 extern std::string g_QuestWordsEra;
+
+// The Dungeon Master's scene channel (plan 62): lines written by custom-wow services/dm/dm.py into dm_line,
+// spoken by the world. BossScene: a dungeon's final boss yells a line once per instance as a real player
+// comes within BossRange yards and in sight of it. BossFallback: speak a line written for anyone (instance 0)
+// when nothing was written for this party. Its own loader timer, not regard's: a party line is written after
+// the party walks in and must be loaded long before they reach the boss.
+extern bool        g_DirectorEnable;
+extern uint32_t    g_DirectorRefreshSeconds;
+extern bool        g_DirectorBossScene;
+extern uint32_t    g_DirectorBossRange;
+extern bool        g_DirectorBossFallback;
+// How many of the party's companions answer what was said (0 = none), and how the scene reads in the event
+// prompt: "Event: <speaker> <AnswerEventType> "<words>"".
+extern uint32_t    g_DirectorAnswerBots;
+extern std::string g_DirectorAnswerEventType;
 // Orders from a bot's master (plan 21 P7): no in-character reply to what mod-playerbots runs as a command.
 extern bool        g_SkipMasterCommands;
 // BlacklistCommands only silences the bots the speaker is master of.

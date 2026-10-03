@@ -193,6 +193,14 @@ std::string Roleplay_BuildVoicePrompt(Player* bot)
             out += " " + it->second;
     }
 
+    // Race and class voices are written for everyone of that race and class,
+    // and read as orders ("You are rarely sentimental"), so they overrule a
+    // bot's own written temperament: a warm, chatty priest came out dry and
+    // grim because she was undead. A preamble can frame them as habits that
+    // the bot's own nature, given earlier in the prompt, takes precedence over.
+    if (!out.empty() && !g_RoleplayVoicePreamble.empty())
+        out = " " + g_RoleplayVoicePreamble + out;
+
     if (g_RoleplayStrictness >= 1)
     {
         // Naming the forbidden things is how you teach them. MEASURED 2026-09-25: bots recited this very

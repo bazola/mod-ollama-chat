@@ -63,6 +63,10 @@ inline bool OllamaIsRealPlayer(Player* player)
 // keep it in step when mod-playerbots is rebased.
 bool OllamaIsCommandFromMaster(Player* bot, Player* speaker, std::string const& msg, bool whisper);
 
+// Does this bot take orders from this speaker (its master)? Only its master's
+// words can be orders to it, which is what BlacklistMastersOnly relies on.
+bool OllamaIsMasterOf(Player* speaker, Player* bot);
+
 // The continent a bot would actually name, for prompt use.
 //
 // Map::GetMapName() answers with the map's own name, and the Burning Crusade

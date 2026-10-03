@@ -4,7 +4,6 @@
 #include "mod-ollama-chat_capability.h"
 #include <string>
 #include <cstdint>
-#include <string>
 
 // Result of one generation call. The old API returned a bare string, so
 // "server unreachable", "model refused to think" and "model said nothing"
@@ -39,6 +38,7 @@ struct OllamaEndpointSettings
     std::string url;
     std::string model;
     std::string systemPrompt;
+    std::string memorySystemPrompt;
     std::string stop;
     std::string seed;
 
@@ -64,7 +64,26 @@ struct OllamaEndpointSettings
     // Empty model = no lane, and every kind keeps using the fields above.
     std::string utilityUrl;
     std::string utilityModel;
+
+    // The person lane: replies to what a real player said. Same shape as the
+    // cheap lane, plus its own token cap, since a stronger model given room to
+    // answer properly needs more than an ambient remark does.
+    std::string replyUrl;
+    std::string replyModel;
+    uint32_t    replyNumPredict = 0;
+
+    // Worker-side typing delay is read from the same immutable config snapshot.
+    bool typingSimulation = false;
+    bool deliverySplit = false;
+    uint32_t deliveryMaxMessageBytes = 255;
+    uint32_t typingBaseDelay = 1000;
+    uint32_t typingDelayPerChar = 250;
+    uint32_t typingMaxDelay = 0;
 };
+
+// Which model a request is sent to. The voice is the default; the person lane
+// only applies when a reply model is configured.
+enum class OllamaLane : uint8_t { Voice, Person };
 
 // Republish from the g_Ollama* globals. Call on the world thread after config
 // load or reload.
@@ -83,7 +102,8 @@ OllamaEndpointSettings OllamaConfig_Snapshot();
 // own small, fixed offset from the configured sampling distribution (plan 49
 // item 3c). 0 means "not a character speaking" -- machinery calls leave it out
 // and are never jittered.
-OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, uint64_t voiceGuid = 0);
+OllamaApiResult QueryOllama(const std::string& prompt, OllamaRequestKind kind, uint64_t voiceGuid = 0,
+                            OllamaLane lane = OllamaLane::Voice);
 
 // Legacy shim: returns the text, or empty on any failure.
 std::string QueryOllamaAPI(const std::string& prompt);

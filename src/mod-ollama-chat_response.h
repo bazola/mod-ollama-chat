@@ -1,8 +1,10 @@
 #ifndef MOD_OLLAMA_CHAT_RESPONSE_H
 #define MOD_OLLAMA_CHAT_RESPONSE_H
 
-#include <string>
+#include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 // --------------------------------------------------------------------------
 // Response post-processing pipeline.
@@ -62,6 +64,12 @@ std::string ClampReplyWords(const std::string& text, uint32_t maxWords);
 // Drop a trailing sentence the model never finished (the token budget ran out mid-thought), when at least
 // one complete sentence comes before it. A line with no complete sentence is left alone.
 std::string DropUnfinishedTail(const std::string& text);
+
+// Split a spoken line into chat messages of at most maxBytes each: whole sentences packed while they
+// fit, a word boundary when one sentence alone is too long, never inside a UTF-8 sequence. At most
+// maxParts messages (0 = no limit); the last one is clamped with ClampReplyLength, so whatever would
+// spill past it is dropped at a sentence end rather than mid-thought.
+std::vector<std::string> SplitForChat(const std::string& text, size_t maxBytes, size_t maxParts);
 
 // Run the full pipeline. Returns an empty string only when nothing usable
 // survived, in which case the caller should skip the reply.

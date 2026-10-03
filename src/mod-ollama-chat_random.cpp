@@ -1,5 +1,6 @@
 #include "mod-ollama-chat_random.h"
 #include "mod-ollama-chat_config.h"
+#include "mod-ollama-chat_conversation.h"
 #include "mod-ollama-chat_response.h"
 #include "mod-ollama-chat_dispatch.h"
 #include "mod-ollama-chat_governor.h"
@@ -284,6 +285,7 @@ OllamaBotRandomChatter::OllamaBotRandomChatter() : WorldScript("OllamaBotRandomC
 
 void OllamaBotRandomChatter::OnUpdate(uint32 diff)
 {
+    Conversation_Update(diff);
     if (!g_Enable)
         return;
 
@@ -411,6 +413,9 @@ void OllamaBotRandomChatter::HandleRandomChatter()
         const bool partyAudience = g_PartyChatterEnable && BotOnlyCompany(bot);
 
         if (!guildAudience && !nearRealPlayer && !partyAudience)
+            continue;
+
+        if (Conversation_HasPartner(bot))
             continue;
 
         // Schedule.

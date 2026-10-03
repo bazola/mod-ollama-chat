@@ -4,6 +4,7 @@
 #include "mod-ollama-chat_personality.h"
 #include "mod-ollama-chat_api.h"
 #include "mod-ollama-chat_capability.h"
+#include "mod-ollama-chat_conversation.h"
 #include "mod-ollama-chat_dispatch.h"
 #include "mod-ollama-chat_governor.h"
 #include "mod-ollama-chat_response.h"
@@ -77,7 +78,7 @@ bool OllamaChatConfigCommand::HandleOllamaReloadCommand(ChatHandler* handler)
     }
 
     LoadBotPersonalityList();
-    LoadBotConversationHistoryFromDB();
+    // Settings reloads must retain unsaved turns; history is loaded only at startup.
     InitializeSentimentTracking();
     handler->SendSysMessage("OllamaChat: Configuration reloaded from conf!");
     return true;
@@ -473,6 +474,12 @@ bool OllamaChatConfigCommand::HandleOllamaStatusCommand(ChatHandler* handler)
                              g_Enable ? "enabled" : "DISABLED",
                              g_OllamaUrl, g_OllamaModel);
     handler->PSendSysMessage("Think: {}", OllamaCapability_StatusText());
+    if (!g_ReplyModel.empty())
+        handler->PSendSysMessage("Person lane: {}{}", g_ReplyModel,
+                                 g_ReplyUrl.empty() ? std::string() : " at " + g_ReplyUrl);
+    handler->PSendSysMessage("Conversation mode: {}   engaged now: {}   Multi-message delivery: {}",
+                             g_ConversationEnable ? "on" : "off", Conversation_Count(),
+                             g_DeliverySplit ? "on" : "off");
 
     handler->PSendSysMessage("Dispatcher: {} workers, {} queued, {} in flight, {} awaiting delivery",
                              dispatch.workers, dispatch.queuedRequests,

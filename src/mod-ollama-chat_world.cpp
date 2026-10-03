@@ -120,6 +120,14 @@ namespace
     }
 }
 
+bool OllamaIsMasterOf(Player* speaker, Player* bot)
+{
+    if (!bot || !speaker || bot == speaker)
+        return false;
+    PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
+    return ai && ai->IsBotAI() && ai->GetMaster() == speaker;
+}
+
 bool OllamaIsCommandFromMaster(Player* bot, Player* speaker, std::string const& msg, bool whisper)
 {
     if (!bot || !speaker || bot == speaker || msg.empty())

@@ -154,6 +154,70 @@ int main()
 
     // TakeWordCap is NOT in this build: it stayed in response.cpp with the config PODs.
 
+    // SplitForChat: WoW's chat box takes 255 bytes, and a person-lane answer can be three times that.
+    {
+        const std::string one = "Short enough to go as it is.";
+        const auto parts = SplitForChat(one, 255, 3);
+        checkTrue("SplitForChat leaves a short line whole", parts.size() == 1 && parts[0] == one,
+                  std::to_string(parts.size()) + " parts");
+    }
+    {
+        std::string s1(120, 'a'); s1 += ".";
+        std::string s2(120, 'b'); s2 += "!";
+        std::string s3(120, 'c'); s3 += "?";
+        const auto parts = SplitForChat(s1 + " " + s2 + " " + s3, 255, 3);
+        checkTrue("SplitForChat packs whole sentences", parts.size() == 2, std::to_string(parts.size()) + " parts");
+        if (parts.size() == 2)
+        {
+            check("SplitForChat first message is two sentences", parts[0], s1 + " " + s2);
+            check("SplitForChat second message is the third", parts[1], s3);
+        }
+        bool fits = true;
+        for (const auto& p : parts)
+            fits = fits && p.size() <= 255;
+        checkTrue("SplitForChat every message fits", fits, "a part exceeded 255 bytes");
+    }
+    {
+        std::string longSentence;
+        for (int i = 0; i < 80; ++i)
+            longSentence += (i ? " " : "") + std::string("word");
+        longSentence += ".";
+        const auto parts = SplitForChat(longSentence, 100, 0);
+        bool ok = !parts.empty();
+        std::string joined;
+        for (const auto& p : parts)
+        {
+            ok = ok && p.size() <= 100 && p.front() != ' ' && p.back() != ' ';
+            joined += (joined.empty() ? "" : " ") + p;
+        }
+        checkTrue("SplitForChat breaks an overlong sentence at words", ok, std::to_string(parts.size()) + " parts");
+        check("SplitForChat loses no words when unlimited", joined, longSentence);
+    }
+    {
+        std::string text;
+        for (int i = 0; i < 10; ++i)
+            text += (i ? " " : "") + std::string(60, char('a' + i)) + ".";
+        const auto parts = SplitForChat(text, 130, 2);
+        checkTrue("SplitForChat stops at maxParts", parts.size() == 2, std::to_string(parts.size()) + " parts");
+        if (parts.size() == 2)
+            checkTrue("SplitForChat last part ends a sentence", parts[1].back() == '.', parts[1]);
+    }
+    {
+        // "é" is two bytes; a byte cut through the middle of it would send the client half a character.
+        std::string text;
+        for (int i = 0; i < 40; ++i)
+            text += "é";
+        const auto parts = SplitForChat(text, 7, 0);
+        bool whole = true;
+        for (const auto& p : parts)
+            whole = whole && p.size() % 2 == 0;
+        checkTrue("SplitForChat never splits a UTF-8 sequence", whole && !parts.empty(), "odd-sized part");
+    }
+    checkTrue("SplitForChat of nothing is nothing", SplitForChat("   ", 255, 3).empty(), "non-empty");
+
+    checkTrue("SplitForChat drops an unrepresentable codepoint instead of splitting it",
+              SplitForChat("é", 1, 0).empty(), "broken UTF-8 was emitted");
+
     std::printf("%s: %d checks, %d failed\n", g_failed ? "FAILURES" : "ok", g_ran, g_failed);
     return g_failed ? 1 : 0;
 }

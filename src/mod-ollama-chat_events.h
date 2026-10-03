@@ -33,9 +33,12 @@ public:
 };
 
 // The Dungeon Master put words in the world in front of `witness` (custom wow plan 62): a boss called out
-// to the party as it came into sight. Bots in the witness's party who heard it remember what was said, and
-// one of them (OllamaChat.Director.AnswerBots) answers it in party chat. World thread only.
-void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, std::string const& words);
+// to the party as it came into sight, or an innkeeper spoke as they came in. Bots in the witness's party who
+// heard it remember what was said (`memory` is a format with {} for the speaker and {} for the words), and
+// one of them (OllamaChat.Director.AnswerBots) answers it in party chat, the event prompt reading
+// "<speaker> <eventType> "<words>"". World thread only.
+void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, std::string const& words,
+                              std::string const& memory, std::string const& eventType);
 
 class ChatOnKill : public PlayerScript
 {

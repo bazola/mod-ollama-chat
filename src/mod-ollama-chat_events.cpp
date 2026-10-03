@@ -485,7 +485,8 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
     return prompt;
 }
 
-void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, std::string const& words)
+void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, std::string const& words,
+                              std::string const& memory, std::string const& eventType)
 {
     if (!witness || !witness->IsInWorld() || words.empty())
         return;
@@ -493,8 +494,7 @@ void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, s
     // Remembered whether or not anyone answers, like every witnessed deed. Cut short: it is a memory of
     // being threatened, not a transcript, and a long quote is what the echo filter exists to throw out.
     std::string quoted = words.size() > 140 ? words.substr(0, words.rfind(' ', 140)) + "..." : words;
-    BroadcastEventMemory(witness, SafeFormat("{} called out to us before the fight: \"{}\"", speakerName, quoted),
-                         g_EventChatterRealPlayerDistance);
+    BroadcastEventMemory(witness, SafeFormat(memory, speakerName, quoted), g_EventChatterRealPlayerDistance);
 
     if (!g_Enable || !g_EnableEventChatter || g_DirectorAnswerBots == 0 || g_DisableForParty)
         return;
@@ -521,7 +521,7 @@ void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, s
     uint32_t queued = 0;
     for (Player* bot : candidates)
     {
-        // No chance roll and no event cooldown: the boss spoke once, to them, and someone answering is the
+        // No chance roll and no event cooldown: the scene spoke once, to them, and someone answering is the
         // scene. The governor still has the last word, so it cannot pile onto a party already talking.
         const uint32_t scope = group->GetGUID().GetCounter();
         const std::string scopeKey = Governor_MakeScopeKey(ChatChannelSourceLocalStr[SRC_PARTY_LOCAL], 0, "", 0, scope);
@@ -529,7 +529,7 @@ void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, s
             continue;
 
         uint32_t maxWords = 0;
-        std::string prompt = eventChatter.BuildPrompt(bot, g_EventChatterPromptTemplate, g_DirectorAnswerEventType,
+        std::string prompt = eventChatter.BuildPrompt(bot, g_EventChatterPromptTemplate, eventType,
                                                       "\"" + words + "\"", speakerName, &maxWords);
         if (prompt.empty())
             continue;

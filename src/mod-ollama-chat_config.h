@@ -474,6 +474,13 @@ extern bool        g_DirectorBossFallback;
 // prompt: "Event: <speaker> <AnswerEventType> "<words>"".
 extern uint32_t    g_DirectorAnswerBots;
 extern std::string g_DirectorAnswerEventType;
+// InnScene (plan 62 1d): an innkeeper says a line written for this player and the zone they are in, when they
+// come within InnRange yards and in sight. One line per player per InnCooldownMinutes, never the same line
+// twice. InnEventType is how the companions' event prompt reads it.
+extern bool        g_DirectorInnScene;
+extern uint32_t    g_DirectorInnRange;
+extern uint32_t    g_DirectorInnCooldownMinutes;
+extern std::string g_DirectorInnEventType;
 // Orders from a bot's master (plan 21 P7): no in-character reply to what mod-playerbots runs as a command.
 extern bool        g_SkipMasterCommands;
 // BlacklistCommands only silences the bots the speaker is master of.

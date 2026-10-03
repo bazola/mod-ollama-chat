@@ -3,8 +3,12 @@
 #include "mod-ollama-chat_events.h"
 #include "mod-ollama-chat_world.h"
 #include "mod-ollama-chat-utilities.h"
+#include "CellImpl.h"
 #include "Creature.h"
 #include "DatabaseEnv.h"
+#include "GameTime.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectMgr.h"
@@ -32,12 +36,20 @@ namespace
         std::string words;
     };
 
-    // (instance id << 32 | speaker entry) -> lines, best first. Instance 0 holds the lines written for
-    // anyone (dm.py boss-words), which are the fallback when nothing was written for this party.
     using LineMap = std::unordered_map<uint64, std::vector<DirectorLine>>;
 
-    std::mutex                      g_DirectorMutex;
-    std::shared_ptr<const LineMap>  g_DirectorLines;
+    struct DirectorLines
+    {
+        // (instance id << 32 | speaker entry) -> lines, best first. Instance 0 holds the lines written for
+        // anyone (dm.py boss-words), which are the fallback when nothing was written for this party.
+        LineMap boss;
+        // (player guid << 32 | zone id) -> lines, best first. Any innkeeper in the zone may say them: what is
+        // said is the zone's talk and the player's standing in it, not the innkeeper's own story.
+        LineMap inn;
+    };
+
+    std::mutex                            g_DirectorMutex;
+    std::shared_ptr<const DirectorLines>  g_DirectorLines;
     std::atomic<bool>               g_DirectorLoading{ false };
 
     // (instance id << 32 | entry) of every boss that has already spoken. Instance maps update on their own
@@ -50,6 +62,12 @@ namespace
 
     // Per real player: ms since the last approach check.
     std::unordered_map<ObjectGuid::LowType, uint32> g_CheckTimers;
+
+    // Inn lines already said (by dm_line id), and when each player was last spoken to by an innkeeper. Both
+    // are lost at a restart; dm.py does not hand out a line it has seen spoken (dm_scene), so the worst case
+    // is one innkeeper speaking again early.
+    std::unordered_set<uint64>                      g_InnSaid;
+    std::unordered_map<ObjectGuid::LowType, time_t> g_InnLastSpoke;
 
     uint64 Key(uint32 instanceId, uint32 entry)
     {
@@ -67,7 +85,7 @@ namespace
         if (!TableExists("dm_line"))
             return;
 
-        auto lines = std::make_shared<LineMap>();
+        auto lines = std::make_shared<DirectorLines>();
         if (QueryResult result = CharacterDatabase.Query(
                 "SELECT id, instance_id, speaker_entry, words FROM dm_line "
                 "WHERE scene = 'boss_approach' AND (expires_at IS NULL OR expires_at > NOW()) "
@@ -76,16 +94,30 @@ namespace
             do
             {
                 Field* f = result->Fetch();
-                (*lines)[Key(f[1].Get<uint32>(), f[2].Get<uint32>())].push_back(
+                lines->boss[Key(f[1].Get<uint32>(), f[2].Get<uint32>())].push_back(
                     { f[0].Get<uint64>(), f[3].Get<std::string>() });
             } while (result->NextRow());
         }
+
+        if (g_DirectorInnScene)
+            if (QueryResult result = CharacterDatabase.Query(
+                    "SELECT id, for_guid, zone_id, words FROM dm_line "
+                    "WHERE scene = 'inn_gossip' AND for_guid <> 0 AND (expires_at IS NULL OR expires_at > NOW()) "
+                    "ORDER BY for_guid, zone_id, `rank`, id"))
+            {
+                do
+                {
+                    Field* f = result->Fetch();
+                    lines->inn[Key(f[1].Get<uint32>(), f[2].Get<uint32>())].push_back(
+                        { f[0].Get<uint64>(), f[3].Get<std::string>() });
+                } while (result->NextRow());
+            }
 
         std::lock_guard<std::mutex> lock(g_DirectorMutex);
         g_DirectorLines = std::move(lines);
     }
 
-    std::shared_ptr<const LineMap> Lines()
+    std::shared_ptr<const DirectorLines> Lines()
     {
         std::lock_guard<std::mutex> lock(g_DirectorMutex);
         return g_DirectorLines;
@@ -155,7 +187,7 @@ namespace
             if (!boss || boss->IsInCombat() || boss->IsInEvadeMode() || !player->IsWithinLOSInMap(boss))
                 continue;
 
-            DirectorLine const* line = PickLine(*lines, instanceId, entry);
+            DirectorLine const* line = PickLine(lines->boss, instanceId, entry);
             if (!line)
                 continue;
 
@@ -172,12 +204,94 @@ namespace
             if (LedgerRecordScene)
                 LedgerRecordScene(player, boss, "boss_approach", line->id);
 
-            OllamaEvents_SceneSpoken(player, boss->GetName(), line->words);
+            OllamaEvents_SceneSpoken(player, boss->GetName(), line->words,
+                                     "{} called out to us before the fight: \"{}\"", g_DirectorAnswerEventType);
 
             if (g_DebugEnabled)
                 LOG_INFO("server.loading", "[Ollama Chat] Director: {} spoke to {} (instance {}, line {})",
                     boss->GetName(), player->GetName(), instanceId, line->id);
         }
+    }
+
+    // The nearest living innkeeper within range. A grid visit of a few yards, once a second, for real players
+    // only: the same search FindNearestCreature makes, with the innkeeper flag in place of an entry.
+    class NearestInnkeeperCheck
+    {
+    public:
+        NearestInnkeeperCheck(WorldObject const& obj, float range) : _obj(obj), _range(range) { }
+
+        bool operator()(Creature* creature)
+        {
+            if (creature->IsAlive() && creature->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) && _obj.IsWithinDistInMap(creature, _range))
+            {
+                _range = _obj.GetDistance(creature);
+                return true;
+            }
+            return false;
+        }
+
+    private:
+        WorldObject const& _obj;
+        float _range;
+    };
+
+    void CheckInn(Player* player)
+    {
+        if (!player->IsAlive() || player->IsInCombat())
+            return;
+
+        ObjectGuid::LowType const guid = player->GetGUID().GetCounter();
+        time_t const now = GameTime::GetGameTime().count();
+        {
+            std::lock_guard<std::mutex> lock(g_DirectorMutex);
+            auto it = g_InnLastSpoke.find(guid);
+            if (it != g_InnLastSpoke.end() && now - it->second < time_t(g_DirectorInnCooldownMinutes) * 60)
+                return;
+        }
+
+        auto lines = Lines();
+        if (!lines)
+            return;
+        auto it = lines->inn.find(Key(guid, player->GetZoneId()));
+        if (it == lines->inn.end())
+            return;
+
+        Creature* innkeeper = nullptr;
+        NearestInnkeeperCheck check(*player, float(g_DirectorInnRange));
+        Acore::CreatureLastSearcher<NearestInnkeeperCheck> searcher(player, innkeeper, check);
+        Cell::VisitObjects(player, searcher, float(g_DirectorInnRange));
+        if (!innkeeper || innkeeper->IsInCombat() || innkeeper->IsHostileTo(player) || !player->IsWithinLOSInMap(innkeeper))
+            return;
+
+        DirectorLine const* line = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_DirectorMutex);
+            for (DirectorLine const& candidate : it->second)
+                if (!g_InnSaid.count(candidate.id))
+                {
+                    line = &candidate;
+                    break;
+                }
+            if (!line)
+                return;
+            g_InnSaid.insert(line->id);
+            g_InnLastSpoke[guid] = now;
+        }
+
+        // Turned to the one it is talking to, and in Universal for the same reason as a boss: the line was
+        // written for this player, and a goblin's greeting that reads as gibberish is not a scene.
+        innkeeper->SetFacingToObject(player);
+        innkeeper->Say(line->words, LANG_UNIVERSAL, player);
+
+        if (LedgerRecordScene)
+            LedgerRecordScene(player, innkeeper, "inn_gossip", line->id);
+
+        OllamaEvents_SceneSpoken(player, innkeeper->GetName(), line->words,
+                                 "{}, the innkeeper, told us: \"{}\"", g_DirectorInnEventType);
+
+        if (g_DebugEnabled)
+            LOG_INFO("server.loading", "[Ollama Chat] Director: {} spoke to {} (zone {}, line {})",
+                innkeeper->GetName(), player->GetName(), player->GetZoneId(), line->id);
     }
 }
 
@@ -190,7 +304,7 @@ void OllamaDirectorWorldScript::OnUpdate(uint32 diff)
 {
     static uint32 timer = 0;    // 0: load on the first tick after enabling
 
-    if (!g_DirectorEnable || !g_DirectorBossScene)
+    if (!g_DirectorEnable || !(g_DirectorBossScene || g_DirectorInnScene))
         return;
 
     if (timer > diff)
@@ -218,12 +332,18 @@ OllamaDirectorPlayerScript::OllamaDirectorPlayerScript()
 
 void OllamaDirectorPlayerScript::OnPlayerUpdate(Player* player, uint32 diff)
 {
-    if (!g_DirectorEnable || !g_DirectorBossScene || !player || !player->IsInWorld())
+    if (!g_DirectorEnable || !(g_DirectorBossScene || g_DirectorInnScene) || !player || !player->IsInWorld())
         return;
 
-    // Cheap tests first: this runs for every player, bots included, on every tick.
+    // Cheap tests first: this runs for every player, bots included, on every tick. Bosses are in dungeons,
+    // innkeepers in the open world (battlegrounds and arenas are neither).
     Map* map = player->FindMap();
-    if (!map || !map->IsDungeon() || !OllamaIsRealPlayer(player))
+    if (!map)
+        return;
+    bool const dungeon = map->IsDungeon();
+    if (dungeon ? !g_DirectorBossScene : (!g_DirectorInnScene || map->Instanceable()))
+        return;
+    if (!OllamaIsRealPlayer(player))
         return;
 
     {
@@ -235,7 +355,10 @@ void OllamaDirectorPlayerScript::OnPlayerUpdate(Player* player, uint32 diff)
         elapsed = 0;
     }
 
-    CheckApproach(player);
+    if (dungeon)
+        CheckApproach(player);
+    else
+        CheckInn(player);
 }
 
 void OllamaDirectorPlayerScript::OnPlayerLogout(Player* player)
@@ -245,6 +368,7 @@ void OllamaDirectorPlayerScript::OnPlayerLogout(Player* player)
 
     std::lock_guard<std::mutex> lock(g_DirectorMutex);
     g_CheckTimers.erase(player->GetGUID().GetCounter());
+    g_InnLastSpoke.erase(player->GetGUID().GetCounter());
 }
 
 OllamaDirectorMapScript::OllamaDirectorMapScript()

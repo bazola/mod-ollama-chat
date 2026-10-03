@@ -290,6 +290,10 @@ uint32_t    g_DirectorBossRange             = 45;
 bool        g_DirectorBossFallback          = true;
 uint32_t    g_DirectorAnswerBots            = 1;
 std::string g_DirectorAnswerEventType       = "called out to your party as you came into sight, before any blow was struck:";
+bool        g_DirectorInnScene              = false;
+uint32_t    g_DirectorInnRange              = 8;
+uint32_t    g_DirectorInnCooldownMinutes    = 30;
+std::string g_DirectorInnEventType          = "said to you as you came into the inn:";
 uint32_t    g_RelationshipMaxLength         = 220;
 std::string g_RelationshipUpdatePrompt;
 std::string g_RelationshipPromptTemplate;
@@ -847,6 +851,11 @@ void LoadOllamaChatConfig()
     g_DirectorAnswerBots           = std::min<uint32_t>(4, sConfigMgr->GetOption<uint32_t>("OllamaChat.Director.AnswerBots", 1));
     g_DirectorAnswerEventType      = sConfigMgr->GetOption<std::string>("OllamaChat.Director.AnswerEventType",
         "called out to your party as you came into sight, before any blow was struck:");
+    g_DirectorInnScene             = sConfigMgr->GetOption<bool>("OllamaChat.Director.InnScene", false);
+    g_DirectorInnRange             = std::clamp<uint32_t>(sConfigMgr->GetOption<uint32_t>("OllamaChat.Director.InnRange", 8), 3, 25);
+    g_DirectorInnCooldownMinutes   = sConfigMgr->GetOption<uint32_t>("OllamaChat.Director.InnCooldownMinutes", 30);
+    g_DirectorInnEventType         = sConfigMgr->GetOption<std::string>("OllamaChat.Director.InnEventType",
+        "said to you as you came into the inn:");
     g_RelationshipMaxLength        = sConfigMgr->GetOption<uint32_t>("OllamaChat.Relationship.MaxLength", 220);
 
     g_RelationshipUpdatePrompt     = sConfigMgr->GetOption<std::string>("OllamaChat.Relationship.UpdatePrompt", "");

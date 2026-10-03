@@ -10,7 +10,8 @@
 // writes it to dm_line. This file decides WHEN, from positions only the
 // worldserver has: it loads dm_line on its own short timer and, when a real
 // player comes within sight of a dungeon's final boss, that boss yells the
-// line once per instance. Nothing here calls a model or makes a query on the
+// line once per instance; when one comes up to an innkeeper, it says the
+// line written for that player and zone. Nothing here calls a model or makes a query on the
 // world thread; the loader runs on a detached thread like the regard loader.
 //
 // Delivery is recorded through mod-ledger (LedgerRecordScene, a weak symbol),
@@ -25,7 +26,8 @@ public:
     void OnUpdate(uint32 diff) override;
 };
 
-// The approach check: a real player in a dungeon, once a second.
+// The approach checks, once a second for a real player: a dungeon's final boss, or an innkeeper in the
+// open world.
 class OllamaDirectorPlayerScript : public PlayerScript
 {
 public:

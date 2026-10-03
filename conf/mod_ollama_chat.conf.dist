@@ -384,6 +384,21 @@ OllamaChat.Director.BossFallback = 1
 OllamaChat.Director.AnswerBots = 1
 OllamaChat.Director.AnswerEventType = "called out to your party as you came into sight, before any blow was struck:"
 
+# OllamaChat.Director.InnScene
+# OllamaChat.Director.InnRange
+# OllamaChat.Director.InnCooldownMinutes
+# OllamaChat.Director.InnEventType
+#     Description: An innkeeper says one line to a real player who comes within InnRange yards (3-25) and in
+#                  sight of it, out of combat and not hostile. The line is one dm.py wrote for this player and
+#                  the zone they are in (scene inn_gossip, written when they enter the zone); with no such
+#                  line the innkeeper says nothing. At most one line per player per InnCooldownMinutes, and a
+#                  line is never said twice. Companions answer as for a boss, with InnEventType in the prompt.
+#     Default:     0, 8, 30, "said to you as you came into the inn:"
+OllamaChat.Director.InnScene = 0
+OllamaChat.Director.InnRange = 8
+OllamaChat.Director.InnCooldownMinutes = 30
+OllamaChat.Director.InnEventType = "said to you as you came into the inn:"
+
 # OllamaChat.BlacklistMastersOnly
 #     Description: 0 = a message starting with any BlacklistCommands prefix gets no reply from any bot.
 #                  1 = it is taken as a command only by the bots the speaker is master of; every other bot

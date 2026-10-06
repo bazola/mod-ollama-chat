@@ -78,6 +78,9 @@ struct OllamaChatRequest
     // Most words the spoken line may keep, from the "@N" on the length instruction drawn for it; 0 = no cap.
     uint32_t    maxWords = 0;
     std::string originMessage;    // the message being replied to, if any
+    // Someone standing alive in front of the speaker (a boss that has just called out, plan 62). A line that
+    // names them beside a word of death is dropped: it is a memory of an earlier fight told as now.
+    std::string aliveName;
 
     // Held back this much longer before the line is delivered, on top of the
     // typing simulation. The group branch staggers its speakers with it: two

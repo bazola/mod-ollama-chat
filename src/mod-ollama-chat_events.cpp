@@ -188,7 +188,9 @@ namespace
 
     // Hand the deed to every bot who was there to see it, the actor included --
     // a bot that dies four times in a marsh should remember it above all.
-    void BroadcastEventMemory(Player* actor, const std::string& line, float radius)
+    // partyOnly: a scene spoken TO a party (plan 62) is theirs. A stranger at the next table who is handed
+    // "told us he heard we took down Glutton" remembers a deed that was never theirs.
+    void BroadcastEventMemory(Player* actor, const std::string& line, float radius, bool partyOnly = false)
     {
         if (!actor || line.empty() || !g_MemoryEnable || !g_MemoryEventEnable)
             return;
@@ -219,6 +221,8 @@ namespace
             if (witness->GetMap() != actor->GetMap())
                 continue;
             if (!actor->IsWithinDistInMap(witness, radius))
+                continue;
+            if (partyOnly && !witness->IsInSameGroupWith(actor))
                 continue;
 
             note(witness);
@@ -486,7 +490,7 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
 }
 
 void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, std::string const& words,
-                              std::string const& memory, std::string const& eventType)
+                              std::string const& memory, std::string const& eventType, bool speakerAlive)
 {
     if (!witness || !witness->IsInWorld() || words.empty())
         return;
@@ -494,7 +498,8 @@ void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, s
     // Remembered whether or not anyone answers, like every witnessed deed. Cut short: it is a memory of
     // being threatened, not a transcript, and a long quote is what the echo filter exists to throw out.
     std::string quoted = words.size() > 140 ? words.substr(0, words.rfind(' ', 140)) + "..." : words;
-    BroadcastEventMemory(witness, SafeFormat(memory, speakerName, quoted), g_EventChatterRealPlayerDistance);
+    BroadcastEventMemory(witness, SafeFormat(memory, speakerName, quoted, witness->GetName()),
+                         g_EventChatterRealPlayerDistance, true);
 
     if (!g_Enable || !g_EnableEventChatter || g_DirectorAnswerBots == 0 || g_DisableForParty)
         return;
@@ -534,10 +539,19 @@ void OllamaEvents_SceneSpoken(Player* witness, std::string const& speakerName, s
         if (prompt.empty())
             continue;
 
+        // A party that has killed this boss before carries the memory of it, and answered its taunt with
+        // "Amnennar the Coldbringer lies cold in Razorfen Downs" while he stood there talking (playtest
+        // 2026-10-05). Said plainly here, and checked again on the way out (OllamaChatRequest::aliveName).
+        if (speakerAlive)
+            prompt += SafeFormat(" {0} is alive and standing before you right now, and the fight has not "
+                                 "begun. Whatever you remember of fighting {0} before is in the past.", speakerName);
+
         OllamaChatRequest request;
         request.botGuid     = bot->GetGUID().GetRawValue();
         request.targetGuid  = 0;
         request.source      = SRC_PARTY_LOCAL;
+        if (speakerAlive)
+            request.aliveName = speakerName;
         request.chainDepth  = 0;
         request.scopeKey    = scopeKey;
         request.prompt      = std::move(prompt);

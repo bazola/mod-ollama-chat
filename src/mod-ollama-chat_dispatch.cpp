@@ -13,6 +13,7 @@
 
 #include <nlohmann/json.hpp>
 #include <random>
+#include <regex>
 
 #include "CellImpl.h"
 #include "Channel.h"
@@ -222,6 +223,31 @@ namespace
         g_lastError = what;
     }
 
+    // Does `text` report `name` dead? `name` is someone standing alive in front of the speaker
+    // (OllamaChatRequest::aliveName). Any word of the name four letters or longer counts as naming them, so
+    // "Amnennar" and "the Coldbringer" both do; "the" does not. A line with no name in it passes, and so does
+    // a threat ("we will see you dead"): only a death told as done is caught.
+    bool ReportsDead(const std::string& text, const std::string& name)
+    {
+        static const std::regex death(
+            R"(\b((is|was|lies|lay|now) (dead|cold|broken|still|silent|fallen|defeated|no more)|slain|slew|fell|felled|perished|lifeless|corpse)\b)",
+            std::regex::icase);
+        if (!std::regex_search(text, death))
+            return false;
+
+        std::string lower = text;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+        std::istringstream words(name);
+        std::string word;
+        while (words >> word)
+        {
+            std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (word.size() >= 4 && lower.find(word) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
     // --- worker -----------------------------------------------------------
 
     void RunChatTask(const Task& task)
@@ -253,6 +279,14 @@ namespace
                          task.request.botName, text);
             }
             text = std::move(filtered);
+        }
+
+        if (!text.empty() && !task.request.aliveName.empty() && ReportsDead(text, task.request.aliveName))
+        {
+            if (g_DebugEnabled)
+                LOG_INFO("module.ollamachat", "[Ollama Chat] Bot {} reported {} dead while they stand: '{}'",
+                         task.request.botName, task.request.aliveName, text);
+            text.clear();
         }
 
         if (text.empty())

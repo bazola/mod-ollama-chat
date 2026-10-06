@@ -205,7 +205,7 @@ namespace
                 LedgerRecordScene(player, boss, "boss_approach", line->id);
 
             OllamaEvents_SceneSpoken(player, boss->GetName(), line->words,
-                                     "{} called out to us before the fight: \"{}\"", g_DirectorAnswerEventType);
+                                     "{0} called out to us before the fight: \"{1}\"", g_DirectorAnswerEventType, true);
 
             if (g_DebugEnabled)
                 LOG_INFO("server.loading", "[Ollama Chat] Director: {} spoke to {} (instance {}, line {})",
@@ -287,7 +287,7 @@ namespace
             LedgerRecordScene(player, innkeeper, "inn_gossip", line->id);
 
         OllamaEvents_SceneSpoken(player, innkeeper->GetName(), line->words,
-                                 "{}, the innkeeper, told us: \"{}\"", g_DirectorInnEventType);
+                                 "{0}, the innkeeper, said to {2}: \"{1}\"", g_DirectorInnEventType, false);
 
         if (g_DebugEnabled)
             LOG_INFO("server.loading", "[Ollama Chat] Director: {} spoke to {} (zone {}, line {})",
